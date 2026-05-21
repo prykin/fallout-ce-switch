@@ -14,7 +14,7 @@ You must own the game to play and have a Switch capable of running **unsigned co
 
 1. Purchase your copy on [GOG](https://www.gog.com/en/game/fallout) or [Steam](https://store.steampowered.com/app/38400/). The files need to be from a Windows installation (I think.)
 2. Download the latest [release](https://github.com/ryandeering/fallout-ce-switch/releases/latest) or build from the source. See YAML pipelines for reference.
-3. Drag the installation files into a new folder called `fallout1` in your `switch` folder on the root of your SD card.
+3. Drag the installation files into a new folder called `fallout1` in your `switch` folder on the root of your SD card. You can have `fallout1` directly in the root too.
 4. Create a file named `fallout1_nx.ini` in your `fallout1` folder to override defaults. **If missing, the game now creates it on first launch.**
 5. Use the following content:
 ```ini
@@ -27,7 +27,11 @@ SCALE_2X=1
 
 6. Put the necessary executable in your `switch` folder on the root of your SD card, either `.nro` or `.nso`.
 
-> **Note:** Fallout 1 CE saves from PC or platforms are/should be supported, but I am not responsible for any corruption or issues that may happen if you use them!
+> **Save compatibility:** Fallout 1 **CE** saves from PC and other CE versions should usually work on Switch. This is experimental and may cause save state corruption.
+>
+> **Keep in mind:**
+> - Some saves from different game versions or heavily modded setups may fail to load.
+> - Make backups before moving saves between platforms.
 
 ## Controls
 
