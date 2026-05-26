@@ -168,6 +168,29 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "SCR_HEIGHT=960\n");
             fprintf(iniFile, "SCALE_2X=1\n");
             fprintf(iniFile, "; Change resolution and determine scaling. SCALE_2X=1 will turn 2x scaling on. SCALE_2X=0 will turn it off.\n");
+            fprintf(iniFile, "\n[CONTROLS]\n");
+            fprintf(iniFile, "; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, CURSOR_SPEEDUP, or SDL-style key names.\n");
+            fprintf(iniFile, "; Prefix key names with HOLD: when the key should remain down while the controller input is held.\n");
+            fprintf(iniFile, "A=A\n");
+            fprintf(iniFile, "B=HOLD:SPACE\n");
+            fprintf(iniFile, "X=S\n");
+            fprintf(iniFile, "Y=I\n");
+            fprintf(iniFile, "PLUS=ESCAPE\n");
+            fprintf(iniFile, "MINUS=C\n");
+            fprintf(iniFile, "LSTICK=1\n");
+            fprintf(iniFile, "RSTICK=KP_ENTER\n");
+            fprintf(iniFile, "DPAD_UP=P\n");
+            fprintf(iniFile, "DPAD_DOWN=HOME\n");
+            fprintf(iniFile, "DPAD_LEFT=F6\n");
+            fprintf(iniFile, "DPAD_RIGHT=F7\n");
+            fprintf(iniFile, "L=B\n");
+            fprintf(iniFile, "R=CURSOR_SPEEDUP\n");
+            fprintf(iniFile, "ZL=MOUSE_LEFT\n");
+            fprintf(iniFile, "ZR=MOUSE_RIGHT\n");
+            fprintf(iniFile, "RIGHT_STICK_UP=HOLD:UP\n");
+            fprintf(iniFile, "RIGHT_STICK_DOWN=HOLD:DOWN\n");
+            fprintf(iniFile, "RIGHT_STICK_LEFT=HOLD:LEFT\n");
+            fprintf(iniFile, "RIGHT_STICK_RIGHT=HOLD:RIGHT\n");
             fclose(iniFile);
         }
     } else {

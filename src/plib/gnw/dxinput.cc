@@ -1,5 +1,9 @@
 #include "plib/gnw/dxinput.h"
+
+#include <stddef.h>
+
 #ifdef __SWITCH__
+#include "plib/gnw/input.h"
 #include "plib/gnw/mouse.h"
 #endif
 
@@ -175,8 +179,43 @@ void handleLeftStickMovement(MouseData* mouseState)
 void handleControllerButtons(MouseData* mouseState)
 {
     u64 buttons = padGetButtons(&pad);
-    mouseState->buttons[0] |= (buttons & HidNpadButton_ZL) != 0;
-    mouseState->buttons[1] |= (buttons & HidNpadButton_ZR) != 0;
+
+    struct ControllerButtonBinding {
+        u64 mask;
+        HidControllerButtons button;
+    };
+
+    static const ControllerButtonBinding bindings[] = {
+        { HidNpadButton_A, HidControllerButtons::KEY_A },
+        { HidNpadButton_B, HidControllerButtons::KEY_B },
+        { HidNpadButton_X, HidControllerButtons::KEY_X },
+        { HidNpadButton_Y, HidControllerButtons::KEY_Y },
+        { HidNpadButton_Plus, HidControllerButtons::KEY_PLUS },
+        { HidNpadButton_Minus, HidControllerButtons::KEY_MINUS },
+        { HidNpadButton_StickL, HidControllerButtons::KEY_LSTICK },
+        { HidNpadButton_StickR, HidControllerButtons::KEY_RSTICK },
+        { HidNpadButton_Up, HidControllerButtons::KEY_DPAD_UP },
+        { HidNpadButton_Down, HidControllerButtons::KEY_DPAD_DOWN },
+        { HidNpadButton_Left, HidControllerButtons::KEY_DPAD_LEFT },
+        { HidNpadButton_Right, HidControllerButtons::KEY_DPAD_RIGHT },
+        { HidNpadButton_L, HidControllerButtons::KEY_L },
+        { HidNpadButton_R, HidControllerButtons::KEY_R },
+        { HidNpadButton_ZL, HidControllerButtons::KEY_ZL },
+        { HidNpadButton_ZR, HidControllerButtons::KEY_ZR },
+    };
+
+    for (size_t index = 0; index < sizeof(bindings) / sizeof(bindings[0]); index++) {
+        if ((buttons & bindings[index].mask) == 0) {
+            continue;
+        }
+
+        const SwitchControlAction& action = switchControlsGetButtonAction(bindings[index].button);
+        if (action.type == SwitchControlActionType::MOUSE_LEFT) {
+            mouseState->buttons[0] = true;
+        } else if (action.type == SwitchControlActionType::MOUSE_RIGHT) {
+            mouseState->buttons[1] = true;
+        }
+    }
 }
 #endif
 

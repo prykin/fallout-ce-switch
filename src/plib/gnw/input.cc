@@ -1,7 +1,10 @@
 #include "plib/gnw/input.h"
 
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef __SWITCH__
 #include <logger.h>
@@ -9,6 +12,7 @@
 #endif
 
 #include "audio_engine.h"
+#include "game/config.h"
 #include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/gnw/button.h"
@@ -136,6 +140,301 @@ static std::queue<SDL_TextInputEvent> textInputQueue;
 bool gInTextInputDialog = false;
 static PadState pad;
 
+static constexpr int SWITCH_BUTTON_COUNT = static_cast<int>(HidControllerButtons::KEY_COUNT);
+static constexpr int SWITCH_STICK_DIRECTION_COUNT = static_cast<int>(SwitchStickDirection::COUNT);
+
+static const SwitchControlAction kNoneAction = {
+    SwitchControlActionType::NONE,
+    SDL_SCANCODE_UNKNOWN,
+    true,
+};
+
+static const SwitchControlAction kDefaultButtonActions[SWITCH_BUTTON_COUNT] = {
+    { SwitchControlActionType::KEY, SDL_SCANCODE_A, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_SPACE, false },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_S, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_I, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_ESCAPE, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_C, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_1, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_KP_ENTER, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_P, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_HOME, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_F6, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_F7, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_B, true },
+    { SwitchControlActionType::CURSOR_SPEEDUP, SDL_SCANCODE_UNKNOWN, false },
+    { SwitchControlActionType::MOUSE_LEFT, SDL_SCANCODE_UNKNOWN, false },
+    { SwitchControlActionType::MOUSE_RIGHT, SDL_SCANCODE_UNKNOWN, false },
+};
+
+static const SwitchControlAction kDefaultStickActions[SWITCH_STICK_DIRECTION_COUNT] = {
+    { SwitchControlActionType::KEY, SDL_SCANCODE_UP, false },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_DOWN, false },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_LEFT, false },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_RIGHT, false },
+};
+
+static const char* kButtonConfigKeys[SWITCH_BUTTON_COUNT] = {
+    "A",
+    "B",
+    "X",
+    "Y",
+    "PLUS",
+    "MINUS",
+    "LSTICK",
+    "RSTICK",
+    "DPAD_UP",
+    "DPAD_DOWN",
+    "DPAD_LEFT",
+    "DPAD_RIGHT",
+    "L",
+    "R",
+    "ZL",
+    "ZR",
+};
+
+static const char* kStickConfigKeys[SWITCH_STICK_DIRECTION_COUNT] = {
+    "RIGHT_STICK_UP",
+    "RIGHT_STICK_DOWN",
+    "RIGHT_STICK_LEFT",
+    "RIGHT_STICK_RIGHT",
+};
+
+static SwitchControlAction switchButtonActions[SWITCH_BUTTON_COUNT];
+static SwitchControlAction switchStickActions[SWITCH_STICK_DIRECTION_COUNT];
+static SwitchStickDirection currentRightStickDirection = SwitchStickDirection::COUNT;
+
+static bool parseSwitchControlAction(const char* value, bool defaultTap, SwitchControlAction* action);
+static bool parseSwitchControlScancode(const char* token, SDL_Scancode* scancode);
+static void normalizeSwitchControlToken(const char* value, char* token, size_t tokenSize);
+static void applySwitchControlAction(const SwitchControlAction& action, bool pressed);
+static void simulateScancodePress(SDL_Scancode scancode);
+
+void switchControlsLoad()
+{
+    memcpy(switchButtonActions, kDefaultButtonActions, sizeof(switchButtonActions));
+    memcpy(switchStickActions, kDefaultStickActions, sizeof(switchStickActions));
+
+    Config config;
+    if (!config_init(&config)) {
+        return;
+    }
+
+    if (config_load(&config, "fallout1_nx.ini", false)) {
+        for (int index = 0; index < SWITCH_BUTTON_COUNT; index++) {
+            char* value;
+            if (config_get_string(&config, "CONTROLS", kButtonConfigKeys[index], &value)) {
+                parseSwitchControlAction(value, kDefaultButtonActions[index].tap, &(switchButtonActions[index]));
+            }
+        }
+
+        for (int index = 0; index < SWITCH_STICK_DIRECTION_COUNT; index++) {
+            char* value;
+            if (config_get_string(&config, "CONTROLS", kStickConfigKeys[index], &value)) {
+                parseSwitchControlAction(value, kDefaultStickActions[index].tap, &(switchStickActions[index]));
+            }
+        }
+    }
+
+    config_exit(&config);
+}
+
+const SwitchControlAction& switchControlsGetButtonAction(HidControllerButtons button)
+{
+    int index = static_cast<int>(button);
+    if (index < 0 || index >= SWITCH_BUTTON_COUNT) {
+        return kNoneAction;
+    }
+
+    return switchButtonActions[index];
+}
+
+const SwitchControlAction& switchControlsGetStickAction(SwitchStickDirection direction)
+{
+    int index = static_cast<int>(direction);
+    if (index < 0 || index >= SWITCH_STICK_DIRECTION_COUNT) {
+        return kNoneAction;
+    }
+
+    return switchStickActions[index];
+}
+
+static void normalizeSwitchControlToken(const char* value, char* token, size_t tokenSize)
+{
+    size_t length = 0;
+
+    if (tokenSize == 0) {
+        return;
+    }
+
+    while (*value != '\0' && length < tokenSize - 1) {
+        char ch = *value++;
+        if (ch == ' ' || ch == '-') {
+            ch = '_';
+        } else {
+            ch = static_cast<char>(toupper(static_cast<unsigned char>(ch)));
+        }
+
+        token[length++] = ch;
+    }
+
+    token[length] = '\0';
+}
+
+static bool parseSwitchControlAction(const char* value, bool defaultTap, SwitchControlAction* action)
+{
+    char token[64];
+    normalizeSwitchControlToken(value, token, sizeof(token));
+
+    char* binding = token;
+    bool tap = defaultTap;
+
+    if (strncmp(binding, "TAP:", 4) == 0) {
+        tap = true;
+        binding += 4;
+    } else if (strncmp(binding, "HOLD:", 5) == 0) {
+        tap = false;
+        binding += 5;
+    }
+
+    if (strncmp(binding, "KEY:", 4) == 0) {
+        binding += 4;
+    }
+
+    if (strcmp(binding, "NONE") == 0 || strcmp(binding, "UNBOUND") == 0) {
+        *action = kNoneAction;
+        return true;
+    }
+
+    if (strcmp(binding, "MOUSE_LEFT") == 0 || strcmp(binding, "LEFT_MOUSE") == 0) {
+        *action = { SwitchControlActionType::MOUSE_LEFT, SDL_SCANCODE_UNKNOWN, false };
+        return true;
+    }
+
+    if (strcmp(binding, "MOUSE_RIGHT") == 0 || strcmp(binding, "RIGHT_MOUSE") == 0) {
+        *action = { SwitchControlActionType::MOUSE_RIGHT, SDL_SCANCODE_UNKNOWN, false };
+        return true;
+    }
+
+    if (strcmp(binding, "CURSOR_SPEEDUP") == 0 || strcmp(binding, "CURSOR_SPEED") == 0) {
+        *action = { SwitchControlActionType::CURSOR_SPEEDUP, SDL_SCANCODE_UNKNOWN, false };
+        return true;
+    }
+
+    SDL_Scancode scancode;
+    if (parseSwitchControlScancode(binding, &scancode)) {
+        *action = { SwitchControlActionType::KEY, scancode, tap };
+        return true;
+    }
+
+    return false;
+}
+
+static bool parseSwitchControlScancode(const char* token, SDL_Scancode* scancode)
+{
+    if (strncmp(token, "KEY_", 4) == 0) {
+        token += 4;
+    }
+
+    if (token[0] >= 'A' && token[0] <= 'Z' && token[1] == '\0') {
+        *scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_A + (token[0] - 'A'));
+        return true;
+    }
+
+    if (token[0] >= '0' && token[0] <= '9' && token[1] == '\0') {
+        *scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_0 + (token[0] - '0'));
+        return true;
+    }
+
+    if (token[0] == 'F') {
+        int functionKey = atoi(token + 1);
+        if (functionKey >= 1 && functionKey <= 12) {
+            *scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_F1 + functionKey - 1);
+            return true;
+        }
+    }
+
+    struct NamedScancode {
+        const char* name;
+        SDL_Scancode scancode;
+    };
+
+    static const NamedScancode namedScancodes[] = {
+        { "SPACE", SDL_SCANCODE_SPACE },
+        { "ESC", SDL_SCANCODE_ESCAPE },
+        { "ESCAPE", SDL_SCANCODE_ESCAPE },
+        { "ENTER", SDL_SCANCODE_RETURN },
+        { "RETURN", SDL_SCANCODE_RETURN },
+        { "KP_ENTER", SDL_SCANCODE_KP_ENTER },
+        { "KEYPAD_ENTER", SDL_SCANCODE_KP_ENTER },
+        { "TAB", SDL_SCANCODE_TAB },
+        { "BACKSPACE", SDL_SCANCODE_BACKSPACE },
+        { "HOME", SDL_SCANCODE_HOME },
+        { "END", SDL_SCANCODE_END },
+        { "PAGE_UP", SDL_SCANCODE_PAGEUP },
+        { "PAGEUP", SDL_SCANCODE_PAGEUP },
+        { "PAGE_DOWN", SDL_SCANCODE_PAGEDOWN },
+        { "PAGEDOWN", SDL_SCANCODE_PAGEDOWN },
+        { "INSERT", SDL_SCANCODE_INSERT },
+        { "DELETE", SDL_SCANCODE_DELETE },
+        { "UP", SDL_SCANCODE_UP },
+        { "DOWN", SDL_SCANCODE_DOWN },
+        { "LEFT", SDL_SCANCODE_LEFT },
+        { "RIGHT", SDL_SCANCODE_RIGHT },
+        { "MINUS", SDL_SCANCODE_MINUS },
+        { "EQUALS", SDL_SCANCODE_EQUALS },
+        { "EQUAL", SDL_SCANCODE_EQUALS },
+        { "COMMA", SDL_SCANCODE_COMMA },
+        { "PERIOD", SDL_SCANCODE_PERIOD },
+        { "DOT", SDL_SCANCODE_PERIOD },
+        { "SLASH", SDL_SCANCODE_SLASH },
+        { "BACKSLASH", SDL_SCANCODE_BACKSLASH },
+        { "LEFT_BRACKET", SDL_SCANCODE_LEFTBRACKET },
+        { "RIGHT_BRACKET", SDL_SCANCODE_RIGHTBRACKET },
+        { "SEMICOLON", SDL_SCANCODE_SEMICOLON },
+        { "APOSTROPHE", SDL_SCANCODE_APOSTROPHE },
+        { "GRAVE", SDL_SCANCODE_GRAVE },
+    };
+
+    for (size_t index = 0; index < sizeof(namedScancodes) / sizeof(namedScancodes[0]); index++) {
+        if (strcmp(token, namedScancodes[index].name) == 0) {
+            *scancode = namedScancodes[index].scancode;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void applySwitchControlAction(const SwitchControlAction& action, bool pressed)
+{
+    KeyboardData keyboardData;
+
+    switch (action.type) {
+    case SwitchControlActionType::KEY:
+        if (action.key == SDL_SCANCODE_UNKNOWN) {
+            return;
+        }
+
+        if (action.tap) {
+            if (pressed) {
+                simulateScancodePress(action.key);
+            }
+        } else {
+            keyboardData.key = action.key;
+            keyboardData.down = pressed ? 1 : 0;
+            GNW95_process_key(&keyboardData);
+        }
+        break;
+    case SwitchControlActionType::CURSOR_SPEEDUP:
+        cursorSpeedup = pressed ? 2.0f : 1.0f;
+        break;
+    default:
+        break;
+    }
+}
+
 static void reinitializeSwitchControllerInput()
 {
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
@@ -184,6 +483,7 @@ int GNW_input_init(int use_msec_timer)
     set_idle_func(idleImpl);
 
 #ifdef __SWITCH__
+    switchControlsLoad();
     reinitializeSwitchControllerInput();
 #endif
 
@@ -1575,213 +1875,50 @@ void handleControllerButtonEvent(HidControllerButtons button, bool pressed) {
         }
     }
 
-    KeyboardData keyboardData;
-
-    switch (button) {
-    case HidControllerButtons::KEY_A:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_A;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_B:
-        keyboardData.key = SDL_SCANCODE_SPACE;
-        keyboardData.down = pressed ? 1 : 0;
-        GNW95_process_key(&keyboardData);
-        break;
-    case HidControllerButtons::KEY_X:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_S;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_Y:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_I;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_PLUS:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_ESCAPE;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_MINUS:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_C;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_R:
-        cursorSpeedup = pressed ? 2.0f : 1.0f;
-        break;
-    case HidControllerButtons::KEY_L:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_B;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_LSTICK:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_1;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_RSTICK:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_KP_ENTER;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_DPAD_UP:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_P;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_DPAD_DOWN:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_HOME;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_DPAD_LEFT:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_F6;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    case HidControllerButtons::KEY_DPAD_RIGHT:
-        if (pressed) {
-            keyboardData.key = SDL_SCANCODE_F7;
-            keyboardData.down = 1;
-            GNW95_process_key(&keyboardData);
-            keyboardData.down = 0;
-            GNW95_process_key(&keyboardData);
-        }
-        break;
-    default:
-        break;
-    }
+    applySwitchControlAction(switchControlsGetButtonAction(button), pressed);
 }
 
 void handleControllerAxisEvent(const HidAnalogStickState& rightStick)
 {
-    if (textInputActive) return;
+    SwitchStickDirection direction = SwitchStickDirection::COUNT;
+
+    if (textInputActive) {
+        if (currentRightStickDirection != SwitchStickDirection::COUNT) {
+            applySwitchControlAction(switchControlsGetStickAction(currentRightStickDirection), false);
+            currentRightStickDirection = SwitchStickDirection::COUNT;
+        }
+        return;
+    }
 
     const uint32_t currentTime = SDL_GetTicks();
     lastControllerTime = currentTime;
 
-    KeyboardData keyboardData;
-
     // Priority: Up > Down > Right > Left
     if (rightStick.y > CONTROLLER_R_DEADZONE && abs(rightStick.y) > abs(rightStick.x)) {
-        keyboardData.key = SDL_SCANCODE_UP;
-        keyboardData.down = 1;
-        GNW95_process_key(&keyboardData);
-        
-        keyboardData.key = SDL_SCANCODE_DOWN;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_LEFT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_RIGHT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
+        direction = SwitchStickDirection::RIGHT_UP;
     } 
     else if (rightStick.y < -CONTROLLER_R_DEADZONE && abs(rightStick.y) > abs(rightStick.x)) {
-        keyboardData.key = SDL_SCANCODE_DOWN;
-        keyboardData.down = 1;
-        GNW95_process_key(&keyboardData);
-
-        keyboardData.key = SDL_SCANCODE_UP;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_LEFT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_RIGHT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
+        direction = SwitchStickDirection::RIGHT_DOWN;
     } 
     else if (rightStick.x > CONTROLLER_R_DEADZONE) {
-        keyboardData.key = SDL_SCANCODE_RIGHT;
-        keyboardData.down = 1;
-        GNW95_process_key(&keyboardData);
-
-        keyboardData.key = SDL_SCANCODE_UP;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_DOWN;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_LEFT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
+        direction = SwitchStickDirection::RIGHT_RIGHT;
     } 
     else if (rightStick.x < -CONTROLLER_R_DEADZONE) {
-        keyboardData.key = SDL_SCANCODE_LEFT;
-        keyboardData.down = 1;
-        GNW95_process_key(&keyboardData);
+        direction = SwitchStickDirection::RIGHT_LEFT;
+    }
 
-        keyboardData.key = SDL_SCANCODE_UP;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_DOWN;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_RIGHT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-    } 
-    else {
-        keyboardData.key = SDL_SCANCODE_UP;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_DOWN;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_LEFT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
-        keyboardData.key = SDL_SCANCODE_RIGHT;
-        keyboardData.down = 0;
-        GNW95_process_key(&keyboardData);
+    if (direction == currentRightStickDirection) {
+        return;
+    }
+
+    if (currentRightStickDirection != SwitchStickDirection::COUNT) {
+        applySwitchControlAction(switchControlsGetStickAction(currentRightStickDirection), false);
+    }
+
+    currentRightStickDirection = direction;
+
+    if (currentRightStickDirection != SwitchStickDirection::COUNT) {
+        applySwitchControlAction(switchControlsGetStickAction(currentRightStickDirection), true);
     }
 }
 #endif

@@ -29,8 +29,35 @@ enum class HidControllerButtons {
     KEY_L,
     KEY_R,
     KEY_ZL,
-    KEY_ZR
+    KEY_ZR,
+    KEY_COUNT
 };
+
+enum class SwitchStickDirection {
+    RIGHT_UP,
+    RIGHT_DOWN,
+    RIGHT_LEFT,
+    RIGHT_RIGHT,
+    COUNT
+};
+
+enum class SwitchControlActionType {
+    NONE,
+    KEY,
+    MOUSE_LEFT,
+    MOUSE_RIGHT,
+    CURSOR_SPEEDUP
+};
+
+typedef struct SwitchControlAction {
+    SwitchControlActionType type;
+    SDL_Scancode key;
+    bool tap;
+} SwitchControlAction;
+
+void switchControlsLoad();
+const SwitchControlAction& switchControlsGetButtonAction(HidControllerButtons button);
+const SwitchControlAction& switchControlsGetStickAction(SwitchStickDirection direction);
 
 #endif
 

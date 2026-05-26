@@ -22,7 +22,31 @@ You must own the game to play and have a Switch capable of running **unsigned co
 SCR_WIDTH=1708
 SCR_HEIGHT=960
 SCALE_2X=1
-; Change resolution and determine scaling. SCALE_2X=1 will turn 2x scaling on. SCALE_2X=0 will turn it off. 
+; Change resolution and determine scaling. SCALE_2X=1 will turn 2x scaling on. SCALE_2X=0 will turn it off.
+
+[CONTROLS]
+; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, CURSOR_SPEEDUP, or SDL-style key names.
+; Prefix key names with HOLD: when the key should remain down while the controller input is held.
+A=A
+B=HOLD:SPACE
+X=S
+Y=I
+PLUS=ESCAPE
+MINUS=C
+LSTICK=1
+RSTICK=KP_ENTER
+DPAD_UP=P
+DPAD_DOWN=HOME
+DPAD_LEFT=F6
+DPAD_RIGHT=F7
+L=B
+R=CURSOR_SPEEDUP
+ZL=MOUSE_LEFT
+ZR=MOUSE_RIGHT
+RIGHT_STICK_UP=HOLD:UP
+RIGHT_STICK_DOWN=HOLD:DOWN
+RIGHT_STICK_LEFT=HOLD:LEFT
+RIGHT_STICK_RIGHT=HOLD:RIGHT
 ```
 
 6. Put the necessary executable in your `switch` folder on the root of your SD card, either `.nro` or `.nso`.
@@ -48,6 +72,7 @@ SCALE_2X=1
 
 - **Cursor Sensitivity**: Adjustable in options via mouse sensitivity. Note this will affect cursor speedup as well.
 - **Resolution**: You can configure resolution and scaling through a config file. Create a file in your `fallout1` folder called `fallout1_nx.ini` - It needs to follow the following structure:
+- **Controls**: You can remap controller buttons in the `[CONTROLS]` section of `fallout1_nx.ini`. Use key names like `A`, `SPACE`, `ESCAPE`, `F6`, `HOME`, `UP`, or actions like `MOUSE_LEFT`, `MOUSE_RIGHT`, `CURSOR_SPEEDUP`, and `NONE`.
 
 ## Issues
 
