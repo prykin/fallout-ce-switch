@@ -7,6 +7,10 @@
 
 #include <algorithm>
 
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
+
 #include "game/automap.h"
 #include "game/bmpdlog.h"
 #include "game/combat.h"
@@ -153,6 +157,12 @@ static int RestoreSave();
 static int LoadObjDudeCid(DB_FILE* stream);
 static int SaveObjDudeCid(DB_FILE* stream);
 static int EraseSave();
+static void InitSaveGamePath();
+static bool IsSaveGamePath(const char* relativePath);
+static const char* SaveGamePathSuffix(const char* relativePath);
+static void BuildPatchedPath(char* path, size_t pathSize, const char* relativePath);
+static void BuildPatchedPathWithFile(char* path, size_t pathSize, const char* relativePath, const char* fileName);
+static void BuildSaveSlotPath(char* path, size_t pathSize, int slot, const char* fileName);
 
 // 0x46D930
 static const int lsgrphs[LOAD_SAVE_FRM_COUNT] = {
@@ -187,6 +197,11 @@ static char* patches = NULL;
 
 // 0x505974
 static char emgpath[] = "\\FALLOUT\\CD\\DATA\\SAVEGAME";
+
+#ifdef __SWITCH__
+static char savegame_path[COMPAT_MAX_PATH];
+static bool savegame_path_initialized = false;
+#endif
 
 static long gvar_offset_correction = 0;
 
@@ -317,6 +332,134 @@ static int fontsave;
 // 0x612D8C
 static CacheEntry* grphkey[LOAD_SAVE_FRM_COUNT];
 
+static void InitSaveGamePath()
+{
+#ifdef __SWITCH__
+    if (savegame_path_initialized) {
+        return;
+    }
+
+    char userId[33];
+    strcpy(userId, "default");
+
+    AccountUid uid = {};
+    bool hasUserId = false;
+
+    Result rc = accountInitialize(AccountServiceType_Application);
+    if (R_SUCCEEDED(rc)) {
+        if (R_SUCCEEDED(accountGetPreselectedUser(&uid)) && accountUidIsValid(&uid)) {
+            hasUserId = true;
+        } else if (R_SUCCEEDED(accountGetLastOpenedUser(&uid)) && accountUidIsValid(&uid)) {
+            hasUserId = true;
+        } else if (R_SUCCEEDED(accountTrySelectUserWithoutInteraction(&uid, false)) && accountUidIsValid(&uid)) {
+            hasUserId = true;
+        }
+
+        accountExit();
+    }
+
+    if (hasUserId) {
+        snprintf(userId,
+            sizeof(userId),
+            "%016llx%016llx",
+            static_cast<unsigned long long>(uid.uid[0]),
+            static_cast<unsigned long long>(uid.uid[1]));
+    }
+
+    compat_mkdir("users");
+    snprintf(str, sizeof(str), "%s\\%s", "users", userId);
+    compat_mkdir(str);
+    snprintf(savegame_path, sizeof(savegame_path), "%s\\%s\\%s", "users", userId, "SAVES");
+    compat_mkdir(savegame_path);
+
+    db_set_savegame_path(savegame_path);
+    savegame_path_initialized = true;
+#else
+    db_set_savegame_path(NULL);
+#endif
+}
+
+static bool IsSaveGamePath(const char* relativePath)
+{
+    static const char prefix[] = "SAVEGAME";
+    static constexpr size_t prefixLength = sizeof(prefix) - 1;
+
+    if (relativePath == NULL) {
+        return false;
+    }
+
+    if (compat_strnicmp(relativePath, prefix, prefixLength) != 0) {
+        return false;
+    }
+
+    char next = relativePath[prefixLength];
+    return next == '\0' || next == '\\' || next == '/';
+}
+
+static const char* SaveGamePathSuffix(const char* relativePath)
+{
+    static const char prefix[] = "SAVEGAME";
+    static constexpr size_t prefixLength = sizeof(prefix) - 1;
+
+    const char* suffix = relativePath + prefixLength;
+    while (*suffix == '\\' || *suffix == '/') {
+        suffix++;
+    }
+
+    return suffix;
+}
+
+static void BuildPatchedPath(char* path, size_t pathSize, const char* relativePath)
+{
+#ifdef __SWITCH__
+    if (IsSaveGamePath(relativePath)) {
+        InitSaveGamePath();
+
+        const char* suffix = SaveGamePathSuffix(relativePath);
+        if (*suffix == '\0') {
+            snprintf(path, pathSize, "%s", savegame_path);
+        } else {
+            snprintf(path, pathSize, "%s\\%s", savegame_path, suffix);
+        }
+        return;
+    }
+#endif
+
+    snprintf(path, pathSize, "%s\\%s", patches, relativePath);
+}
+
+static void BuildPatchedPathWithFile(char* path, size_t pathSize, const char* relativePath, const char* fileName)
+{
+#ifdef __SWITCH__
+    if (IsSaveGamePath(relativePath)) {
+        InitSaveGamePath();
+
+        const char* suffix = SaveGamePathSuffix(relativePath);
+        if (*suffix == '\0') {
+            snprintf(path, pathSize, "%s\\%s", savegame_path, fileName);
+        } else {
+            snprintf(path, pathSize, "%s\\%s%s", savegame_path, suffix, fileName);
+        }
+        return;
+    }
+#endif
+
+    snprintf(path, pathSize, "%s\\%s%s", patches, relativePath, fileName);
+}
+
+static void BuildSaveSlotPath(char* path, size_t pathSize, int slot, const char* fileName)
+{
+    char relativePath[COMPAT_MAX_PATH];
+
+    if (fileName == NULL) {
+        snprintf(relativePath, sizeof(relativePath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", slot + 1);
+    } else {
+        snprintf(relativePath, sizeof(relativePath), "%s\\%s%.2d\\%s", "SAVEGAME", "SLOT", slot + 1, fileName);
+    }
+
+    BuildPatchedPath(path, pathSize, relativePath);
+}
+
 // 0x46D954
 void InitLoadSave()
 {
@@ -327,6 +470,8 @@ void InitLoadSave()
         debug_printf("\nLOADSAVE: Error reading patches config variable! Using default.\n");
         patches = emgpath;
     }
+
+    InitSaveGamePath();
 
     MapDirErase("MAPS\\", "SAV");
 }
@@ -348,6 +493,8 @@ int SaveGame(int mode)
         debug_printf("\nLOADSAVE: Error reading patches config variable! Using default.\n");
         patches = emgpath;
     }
+
+    InitSaveGamePath();
 
     if (mode == LOAD_SAVE_MODE_QUICK && quick_done) {
         snprintf(gmpath, sizeof(gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", slot_cursor + 1);
@@ -861,6 +1008,8 @@ int LoadGame(int mode)
         debug_printf("\nLOADSAVE: Error reading patches config variable! Using default.\n");
         patches = emgpath;
     }
+
+    InitSaveGamePath();
 
     if (mode == LOAD_SAVE_MODE_QUICK && quick_done) {
         int quickSaveWindowX = (screenGetWidth() - LS_WINDOW_WIDTH) / 2;
@@ -1512,10 +1661,10 @@ static int SaveSlot()
 
     gsound_background_pause();
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s", patches, "SAVEGAME");
+    BuildPatchedPath(gmpath, sizeof(gmpath), "SAVEGAME");
     compat_mkdir(gmpath);
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
     compat_mkdir(gmpath);
 
     if (SaveBackup() == -1) {
@@ -2400,9 +2549,8 @@ static int GameMap2Slot(DB_FILE* stream)
         return -1;
     }
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
     strmfe(str0, "AUTOMAP.DB", "SAV");
-    strcat(gmpath, str0);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, str0);
     compat_remove(gmpath);
 
     for (int index = 0; index < fileNameListLength; index += 1) {
@@ -2600,8 +2748,7 @@ static int SlotMap2Game(DB_FILE* stream)
             break;
         }
 
-        snprintf(files[fileCount].srcPath, COMPAT_MAX_PATH, "%s/%s/SLOT%.2d/%s",
-                 patches, "SAVEGAME", slot_cursor + 1, fileName);
+        BuildSaveSlotPath(files[fileCount].srcPath, COMPAT_MAX_PATH, slot_cursor, fileName);
         snprintf(files[fileCount].dstPath, COMPAT_MAX_PATH, "%s/%s/%s",
                  patches, "MAPS", fileName);
         snprintf(files[fileCount].fileName, COMPAT_MAX_PATH, "%s", fileName);
@@ -2655,8 +2802,7 @@ static int SlotMap2Game(DB_FILE* stream)
     }
 
     const char* automapFileName = strmfe(str1, "AUTOMAP.DB", "SAV");
-    snprintf(files[fileCount].srcPath, COMPAT_MAX_PATH, "%s/%s/SLOT%.2d/%s",
-             patches, "SAVEGAME", slot_cursor + 1, automapFileName);
+    BuildSaveSlotPath(files[fileCount].srcPath, COMPAT_MAX_PATH, slot_cursor, automapFileName);
     snprintf(files[fileCount].dstPath, COMPAT_MAX_PATH, "%s/%s/%s",
              patches, "MAPS", "AUTOMAP.DB");
     snprintf(files[fileCount].fileName, COMPAT_MAX_PATH, "%s", "AUTOMAP.DB");
@@ -2890,7 +3036,7 @@ int MapDirErase(const char* relativePath, const char* extension)
     }
 
     while (--fileListLength >= 0) {
-        snprintf(path, sizeof(path), "%s\\%s%s", patches, relativePath, fileList[fileListLength]);
+        BuildPatchedPathWithFile(path, sizeof(path), relativePath, fileList[fileListLength]);
         if (compat_remove(path) != 0) {
             db_free_file_list(&fileList, NULL);
             return -1;
@@ -2906,7 +3052,7 @@ int MapDirEraseFile(const char* a1, const char* a2)
 {
     char path[COMPAT_MAX_PATH];
 
-    snprintf(path, sizeof(path), "%s\\%s%s", patches, a1, a2);
+    BuildPatchedPathWithFile(path, sizeof(path), a1, a2);
     if (compat_remove(path) != 0) {
         return -1;
     }
@@ -2919,16 +3065,13 @@ static int SaveBackup()
 {
     debug_printf("\nLOADSAVE: Backing up save slot files..\n");
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
-    strcpy(str0, gmpath);
-
-    strcat(str0, "SAVE.DAT");
-
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
+    BuildSaveSlotPath(str0, sizeof(str0), slot_cursor, "SAVE.DAT");
     strmfe(str1, str0, "BAK");
 
-    DB_FILE* stream1 = db_fopen(str0, "rb");
+    FILE* stream1 = compat_fopen(str0, "rb");
     if (stream1 != NULL) {
-        db_fclose(stream1);
+        fclose(stream1);
         if (compat_rename(str0, str1) != 0) {
             return -1;
         }
@@ -2945,7 +3088,7 @@ static int SaveBackup()
 
     map_backup_count = fileListLength;
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
     for (int index = fileListLength - 1; index >= 0; index--) {
         strcpy(str0, gmpath);
         strcat(str0, fileList[index]);
@@ -2992,9 +3135,8 @@ static int RestoreSave()
 
     EraseSave();
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
-    strcpy(str0, gmpath);
-    strcat(str0, "SAVE.DAT");
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
+    BuildSaveSlotPath(str0, sizeof(str0), slot_cursor, "SAVE.DAT");
     strmfe(str1, str0, "BAK");
     compat_remove(str0);
 
@@ -3018,7 +3160,7 @@ static int RestoreSave()
         return -1;
     }
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
 
     for (int index = fileListLength - 1; index >= 0; index--) {
         strcpy(str0, gmpath);
@@ -3038,7 +3180,7 @@ static int RestoreSave()
         return 0;
     }
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
     char* v1 = strmfe(str2, "AUTOMAP.DB", "BAK");
     strcpy(str0, gmpath);
     strcat(str0, v1);
@@ -3080,9 +3222,8 @@ static int EraseSave()
 {
     debug_printf("\nLOADSAVE: Erasing save(bad) slot...\n");
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
-    strcpy(str0, gmpath);
-    strcat(str0, "SAVE.DAT");
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
+    BuildSaveSlotPath(str0, sizeof(str0), slot_cursor, "SAVE.DAT");
     compat_remove(str0);
 
     snprintf(gmpath, sizeof(gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", slot_cursor + 1);
@@ -3094,7 +3235,7 @@ static int EraseSave()
         return -1;
     }
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
     for (int index = fileListLength - 1; index >= 0; index--) {
         strcpy(str0, gmpath);
         strcat(str0, fileList[index]);
@@ -3103,7 +3244,7 @@ static int EraseSave()
 
     db_free_file_list(&fileList, NULL);
 
-    snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d\\", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
+    BuildSaveSlotPath(gmpath, sizeof(gmpath), slot_cursor, NULL);
 
     char* v1 = strmfe(str1, "AUTOMAP.DB", "SAV");
     strcpy(str0, gmpath);

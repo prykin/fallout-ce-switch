@@ -28,6 +28,7 @@ DB_DATABASE* db_current();
 int db_total();
 int db_close(DB_DATABASE* db_handle);
 void db_exit();
+void db_set_savegame_path(const char* path);
 int db_dir_entry(const char* filePath, dir_entry* de);
 int db_read_to_buf(const char* filePath, unsigned char* ptr);
 DB_FILE* db_fopen(const char* filename, const char* mode);

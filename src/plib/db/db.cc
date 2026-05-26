@@ -105,6 +105,7 @@ static char* db_default_strdup(const char* string);
 static void db_default_free(void* ptr);
 static void db_preload_buffer(DB_FILE* stream);
 static int fread_short(FILE* stream, unsigned short* s);
+static bool db_build_savegame_path(char* dest, size_t destSize, const char* path);
 
 static inline bool fileFindIsDirectory(DB_FIND_DATA* find_data);
 static inline char* fileFindGetName(DB_FIND_DATA* find_data);
@@ -114,6 +115,9 @@ static char empty_patches_path[] = "";
 
 // 0x539D34
 static DB_DATABASE* current_database = NULL;
+
+static char db_savegame_path[COMPAT_MAX_PATH];
+static bool db_savegame_path_enabled = false;
 
 // 0x539D38
 static bool db_used_malloc = false;
@@ -269,12 +273,26 @@ void db_exit()
     }
 }
 
+void db_set_savegame_path(const char* path)
+{
+    if (path == NULL || *path == '\0') {
+        db_savegame_path[0] = '\0';
+        db_savegame_path_enabled = false;
+        return;
+    }
+
+    strncpy(db_savegame_path, path, sizeof(db_savegame_path) - 1);
+    db_savegame_path[sizeof(db_savegame_path) - 1] = '\0';
+    db_savegame_path_enabled = true;
+}
+
 // 0x4AF068
 int db_dir_entry(const char* name, dir_entry* de)
 {
     char path[COMPAT_MAX_PATH];
     bool v2;
     bool v3;
+    bool savegame_path;
     int value;
     FILE* stream;
 
@@ -296,17 +314,22 @@ int db_dir_entry(const char* name, dir_entry* de)
         v2 = false;
     }
 
-    if (current_database->patches_path != NULL) {
+    savegame_path = false;
+    if (v2) {
+        savegame_path = db_build_savegame_path(path, sizeof(path), name);
+    }
+
+    if (current_database->patches_path != NULL || savegame_path) {
         stream = NULL;
         v3 = false;
 
-        if (v2) {
+        if (v2 && !savegame_path) {
             snprintf(path, sizeof(path), "%s%s", current_database->patches_path, name);
         }
 
         compat_windows_path_to_native(path);
 
-        if (db_get_hash_value(current_database, path, PATH_SEP, &value) != 0 || value == 1) {
+        if (savegame_path || db_get_hash_value(current_database, path, PATH_SEP, &value) != 0 || value == 1) {
             v3 = true;
         }
 
@@ -322,6 +345,10 @@ int db_dir_entry(const char* name, dir_entry* de)
             fclose(stream);
             return 0;
         }
+    }
+
+    if (savegame_path) {
+        return -1;
     }
 
     if (current_database->datafile == NULL) {
@@ -353,6 +380,7 @@ int db_read_to_buf(const char* filename, unsigned char* buf)
     bool v1;
     char path[COMPAT_MAX_PATH];
     bool v3;
+    bool savegame_path;
     FILE* stream;
     int hash_value;
     int size;
@@ -381,17 +409,22 @@ int db_read_to_buf(const char* filename, unsigned char* buf)
         v1 = false;
     }
 
-    if (current_database->patches_path != NULL) {
+    savegame_path = false;
+    if (v1) {
+        savegame_path = db_build_savegame_path(path, sizeof(path), filename);
+    }
+
+    if (current_database->patches_path != NULL || savegame_path) {
         stream = NULL;
         v3 = false;
 
-        if (v1) {
+        if (v1 && !savegame_path) {
             snprintf(path, sizeof(path), "%s%s", current_database->patches_path, filename);
         }
 
         compat_windows_path_to_native(path);
 
-        if (db_get_hash_value(current_database, path, PATH_SEP, &hash_value) != 0 || hash_value == 1) {
+        if (savegame_path || db_get_hash_value(current_database, path, PATH_SEP, &hash_value) != 0 || hash_value == 1) {
             v3 = true;
         }
 
@@ -428,6 +461,10 @@ int db_read_to_buf(const char* filename, unsigned char* buf)
 
             return 0;
         }
+    }
+
+    if (savegame_path) {
+        return -1;
     }
 
     if (current_database->datafile == NULL) {
@@ -534,6 +571,7 @@ DB_FILE* db_fopen(const char* filename, const char* mode)
     char path[COMPAT_MAX_PATH];
     FILE* stream;
     bool v2;
+    bool savegame_path;
     int hash_value;
     int mode_value;
     bool mode_is_text;
@@ -592,10 +630,15 @@ DB_FILE* db_fopen(const char* filename, const char* mode)
         v1 = false;
     }
 
-    if (current_database->patches_path != NULL) {
+    savegame_path = false;
+    if (v1) {
+        savegame_path = db_build_savegame_path(path, sizeof(path), filename);
+    }
+
+    if (current_database->patches_path != NULL || savegame_path) {
         v2 = false;
 
-        if (v1) {
+        if (v1 && !savegame_path) {
             snprintf(path, sizeof(path), "%s%s", current_database->patches_path, filename);
         }
 
@@ -605,7 +648,7 @@ DB_FILE* db_fopen(const char* filename, const char* mode)
             db_add_hash_entry_to_database(current_database, path, PATH_SEP);
             v2 = true;
         } else {
-            if (db_get_hash_value(current_database, path, PATH_SEP, &hash_value) != 0 || hash_value == 1) {
+            if (savegame_path || db_get_hash_value(current_database, path, PATH_SEP, &hash_value) != 0 || hash_value == 1) {
                 v2 = true;
             }
         }
@@ -617,6 +660,10 @@ DB_FILE* db_fopen(const char* filename, const char* mode)
         if (stream != NULL) {
             return db_add_fp_rec(stream, NULL, 0, flags | 0x4);
         }
+    }
+
+    if (savegame_path) {
+        return NULL;
     }
 
     if (mode_value == 0) {
@@ -1647,6 +1694,7 @@ int db_get_file_list(const char* filespec, char*** filelist, char*** desclist, i
     char* filename;
     char* temp;
     assoc_array ary;
+    bool savegame_path;
     int pos;
     int index;
     int count = 0;
@@ -1675,6 +1723,16 @@ int db_get_file_list(const char* filespec, char*** filelist, char*** desclist, i
         v1 = false;
     }
 
+    savegame_path = false;
+    if (v1) {
+        savegame_path = db_build_savegame_path(path, sizeof(path), filespec_copy);
+        if (savegame_path) {
+            strcpy(filespec_copy_buffer, path);
+            filespec_copy = filespec_copy_buffer;
+            v1 = false;
+        }
+    }
+
     *filelist = NULL;
 
     sep = strrchr(filespec_copy, '\\');
@@ -1699,7 +1757,7 @@ int db_get_file_list(const char* filespec, char*** filelist, char*** desclist, i
             strcpy(path, filespec_copy);
         }
 
-        if (current_database->datafile != NULL) {
+        if (current_database->datafile != NULL && !savegame_path) {
             pos = 0;
 
             if (v1) {
@@ -1759,11 +1817,13 @@ int db_get_file_list(const char* filespec, char*** filelist, char*** desclist, i
             }
         }
 
-        if (current_database->patches_path != NULL) {
+        if (current_database->patches_path != NULL || savegame_path) {
             DB_FIND_DATA find_data;
 
             if (v1) {
                 snprintf(path, sizeof(path), "%s%s", current_database->patches_path, filespec_copy);
+            } else {
+                strcpy(path, filespec_copy);
             }
 
             compat_windows_path_to_native(path);
@@ -2797,6 +2857,38 @@ static int fread_short(FILE* stream, unsigned short* s)
     *s = (low & 0xFF) | (high << 8);
 
     return 0;
+}
+
+static bool db_build_savegame_path(char* dest, size_t destSize, const char* path)
+{
+    const char* suffix;
+    static const char prefix[] = "SAVEGAME";
+    static constexpr size_t prefixLength = sizeof(prefix) - 1;
+
+    if (!db_savegame_path_enabled || dest == NULL || destSize == 0 || path == NULL) {
+        return false;
+    }
+
+    if (compat_strnicmp(path, prefix, prefixLength) != 0) {
+        return false;
+    }
+
+    suffix = path + prefixLength;
+    if (*suffix != '\0' && *suffix != '\\' && *suffix != '/') {
+        return false;
+    }
+
+    while (*suffix == '\\' || *suffix == '/') {
+        suffix++;
+    }
+
+    if (*suffix == '\0') {
+        snprintf(dest, destSize, "%s", db_savegame_path);
+    } else {
+        snprintf(dest, destSize, "%s\\%s", db_savegame_path, suffix);
+    }
+
+    return true;
 }
 
 static inline bool fileFindIsDirectory(DB_FIND_DATA* findData)
