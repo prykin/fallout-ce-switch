@@ -49,6 +49,9 @@ static int gmouse_3d_set_flat_fid(int fid, Rect* rect);
 static int gmouse_3d_reset_flat_fid(Rect* rect);
 static int gmouse_3d_move_to(int x, int y, int elevation, Rect* a4);
 static int gmouse_check_scrolling(int x, int y, int cursor);
+static void gmouse_reset_edge_scroll();
+static bool gmouse_consume_edge_scroll(int targetDx, int targetDy, int* scrollX, int* scrollY);
+static int gmouse_consume_edge_scroll_pixels(double* remainder);
 static bool gmouse_hold_highlight_includes_items();
 static bool gmouse_hold_highlight_includes_enemies();
 static void gmouse_add_hold_highlight_object(Object* object, int outlineType);
@@ -305,6 +308,13 @@ static GameMouseHoldHighlightMode gHoldHighlightMode = GAME_MOUSE_HOLD_HIGHLIGHT
 static bool gHoldHighlightActive = false;
 static std::vector<HoldHighlightObject> gHoldHighlightedObjects;
 
+static constexpr unsigned int GMOUSE_EDGE_SCROLL_MAX_ELAPSED_MS = 100;
+static constexpr double GMOUSE_EDGE_SCROLL_PIXELS_PER_SECOND = 420.0;
+static constexpr double GMOUSE_EDGE_SCROLL_DIAGONAL_SCALE = 0.7071067811865476;
+static unsigned int gmouse_edge_scroll_last_time = 0;
+static double gmouse_edge_scroll_remainder_x = 0.0;
+static double gmouse_edge_scroll_remainder_y = 0.0;
+
 // 0x5053F4
 bool gmouse_clicked_on_edge = false;
 
@@ -512,7 +522,7 @@ void gmouse_bk_process()
         int stickScrollX;
         int stickScrollY;
         if (switchRightStickCameraConsumeMapScroll(&stickScrollX, &stickScrollY)) {
-            if (map_scroll(stickScrollX, stickScrollY) == 0) {
+            if (map_scroll_by_pixels(stickScrollX, stickScrollY) == 0) {
                 return;
             }
         }
@@ -2396,22 +2406,77 @@ static int gmouse_check_scrolling(int x, int y, int cursor)
     }
 
     if (dx == 0 && dy == 0) {
+        gmouse_reset_edge_scroll();
         return -1;
     }
 
-    int rc = map_scroll(dx, dy);
-    switch (rc) {
-    case -1:
-        // Scrolling is blocked for whatever reason, upgrade cursor to
-        // appropriate blocked version.
-        cursor += 8;
-        // FALLTHROUGH
-    case 0:
-        gmouse_set_cursor(cursor);
-        break;
+    int scrollX;
+    int scrollY;
+    if (gmouse_consume_edge_scroll(dx, dy, &scrollX, &scrollY)) {
+        int rc = map_scroll_by_pixels(scrollX, scrollY);
+        if (rc == -1) {
+            // Scrolling is blocked for whatever reason, upgrade cursor to
+            // appropriate blocked version.
+            cursor += 8;
+        }
     }
 
+    gmouse_set_cursor(cursor);
     return 0;
+}
+
+static void gmouse_reset_edge_scroll()
+{
+    gmouse_edge_scroll_last_time = 0;
+    gmouse_edge_scroll_remainder_x = 0.0;
+    gmouse_edge_scroll_remainder_y = 0.0;
+}
+
+static bool gmouse_consume_edge_scroll(int targetDx, int targetDy, int* scrollX, int* scrollY)
+{
+    *scrollX = 0;
+    *scrollY = 0;
+
+    if (targetDx == 0 && targetDy == 0) {
+        gmouse_reset_edge_scroll();
+        return false;
+    }
+
+    unsigned int now = get_time();
+    if (gmouse_edge_scroll_last_time == 0) {
+        gmouse_edge_scroll_last_time = now;
+        return false;
+    }
+
+    unsigned int elapsed = elapsed_time(gmouse_edge_scroll_last_time);
+    gmouse_edge_scroll_last_time = now;
+
+    if (elapsed > GMOUSE_EDGE_SCROLL_MAX_ELAPSED_MS) {
+        elapsed = GMOUSE_EDGE_SCROLL_MAX_ELAPSED_MS;
+    }
+
+    double targetX = static_cast<double>(targetDx);
+    double targetY = static_cast<double>(targetDy);
+    if (targetDx != 0 && targetDy != 0) {
+        targetX *= GMOUSE_EDGE_SCROLL_DIAGONAL_SCALE;
+        targetY *= GMOUSE_EDGE_SCROLL_DIAGONAL_SCALE;
+    }
+
+    double seconds = static_cast<double>(elapsed) / 1000.0;
+    gmouse_edge_scroll_remainder_x += targetX * GMOUSE_EDGE_SCROLL_PIXELS_PER_SECOND * seconds;
+    gmouse_edge_scroll_remainder_y += targetY * GMOUSE_EDGE_SCROLL_PIXELS_PER_SECOND * seconds;
+
+    *scrollX = gmouse_consume_edge_scroll_pixels(&gmouse_edge_scroll_remainder_x);
+    *scrollY = gmouse_consume_edge_scroll_pixels(&gmouse_edge_scroll_remainder_y);
+
+    return *scrollX != 0 || *scrollY != 0;
+}
+
+static int gmouse_consume_edge_scroll_pixels(double* remainder)
+{
+    int scroll = static_cast<int>(*remainder);
+    *remainder -= scroll;
+    return scroll;
 }
 
 // 0x445FD0

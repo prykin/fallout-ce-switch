@@ -139,10 +139,9 @@ static bool textInputActive = false;
 const int CONTROLLER_R_DEADZONE = 8000;
 const int CONTROLLER_R_MAX_VALUE = 32767;
 const Uint32 RIGHT_STICK_CAMERA_MAX_ELAPSED_MS = 100;
-const Uint32 RIGHT_STICK_LOCAL_SCROLL_STEP_MS = 33;
 const double RIGHT_STICK_CAMERA_ACCELERATION = 14.0;
 const double RIGHT_STICK_CAMERA_DECELERATION = 8.0;
-const double RIGHT_STICK_LOCAL_SCROLL_STEPS_PER_SECOND = 18.0;
+const double RIGHT_STICK_LOCAL_SCROLL_PIXELS_PER_SECOND = 420.0;
 const double RIGHT_STICK_WORLDMAP_SCROLL_PIXELS_PER_SECOND = 520.0;
 const double RIGHT_STICK_CAMERA_STOP_EPSILON = 0.01;
 static std::queue<SDL_TextInputEvent> textInputQueue;
@@ -199,7 +198,6 @@ static SwitchControlAction switchButtonActions[SWITCH_BUTTON_COUNT];
 static Uint32 gRightStickCameraLastUpdateTime = 0;
 static Uint32 gRightStickCameraLastMapConsumeTime = 0;
 static Uint32 gRightStickCameraLastWorldMapConsumeTime = 0;
-static Uint32 gRightStickCameraLastMapStepTime = 0;
 static double gRightStickCameraX = 0.0;
 static double gRightStickCameraY = 0.0;
 static double gRightStickMapRemainderX = 0.0;
@@ -216,7 +214,6 @@ static void simulateScancodePress(SDL_Scancode scancode);
 static double normalizeSwitchRightStickAxis(int value);
 static void updateRightStickCamera(const HidAnalogStickState& rightStick);
 static void addRightStickCameraScroll(double seconds, double scrollPerSecond, double* remainderX, double* remainderY);
-static int consumeRightStickScrollStep(double* remainder);
 static int consumeRightStickScrollPixels(double* remainder);
 
 void switchControlsLoad()
@@ -261,7 +258,6 @@ void switchRightStickCameraReset()
     gRightStickCameraLastUpdateTime = 0;
     gRightStickCameraLastMapConsumeTime = 0;
     gRightStickCameraLastWorldMapConsumeTime = 0;
-    gRightStickCameraLastMapStepTime = 0;
     gRightStickCameraX = 0.0;
     gRightStickCameraY = 0.0;
     gRightStickMapRemainderX = 0.0;
@@ -290,21 +286,16 @@ bool switchRightStickCameraConsumeMapScroll(int* dx, int* dy)
 
     addRightStickCameraScroll(
         static_cast<double>(elapsed) / 1000.0,
-        RIGHT_STICK_LOCAL_SCROLL_STEPS_PER_SECOND,
+        RIGHT_STICK_LOCAL_SCROLL_PIXELS_PER_SECOND,
         &gRightStickMapRemainderX,
         &gRightStickMapRemainderY);
 
-    if (now - gRightStickCameraLastMapStepTime < RIGHT_STICK_LOCAL_SCROLL_STEP_MS) {
-        return false;
-    }
-
-    int scrollX = consumeRightStickScrollStep(&gRightStickMapRemainderX);
-    int scrollY = consumeRightStickScrollStep(&gRightStickMapRemainderY);
+    int scrollX = consumeRightStickScrollPixels(&gRightStickMapRemainderX);
+    int scrollY = consumeRightStickScrollPixels(&gRightStickMapRemainderY);
     if (scrollX == 0 && scrollY == 0) {
         return false;
     }
 
-    gRightStickCameraLastMapStepTime = now;
     *dx = scrollX;
     *dy = scrollY;
     return true;
@@ -403,21 +394,6 @@ static void addRightStickCameraScroll(double seconds, double scrollPerSecond, do
 {
     *remainderX += gRightStickCameraX * scrollPerSecond * seconds;
     *remainderY += gRightStickCameraY * scrollPerSecond * seconds;
-}
-
-static int consumeRightStickScrollStep(double* remainder)
-{
-    if (*remainder >= 1.0) {
-        *remainder -= 1.0;
-        return 1;
-    }
-
-    if (*remainder <= -1.0) {
-        *remainder += 1.0;
-        return -1;
-    }
-
-    return 0;
 }
 
 static int consumeRightStickScrollPixels(double* remainder)

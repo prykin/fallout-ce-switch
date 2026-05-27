@@ -79,6 +79,15 @@ namespace fallout {
 #define VIEWPORT_MAX_X 950
 #define VIEWPORT_MAX_Y 1058
 
+#ifdef __SWITCH__
+static constexpr unsigned int WORLDMAP_EDGE_SCROLL_MAX_ELAPSED_MS = 100;
+static constexpr double WORLDMAP_EDGE_SCROLL_PIXELS_PER_SECOND = 520.0;
+static constexpr double WORLDMAP_EDGE_SCROLL_DIAGONAL_SCALE = 0.7071067811865476;
+static unsigned int worldmap_edge_scroll_last_time = 0;
+static double worldmap_edge_scroll_remainder_x = 0.0;
+static double worldmap_edge_scroll_remainder_y = 0.0;
+#endif
+
 typedef struct CityLocationEntry {
     int column;
     int row;
@@ -111,6 +120,11 @@ static void UnregTMAPsels(int count);
 static void DrawTMAPsels(int win, int city);
 static void CalcTimeAdder();
 static void BlackOut();
+#ifdef __SWITCH__
+static void worldmap_reset_edge_scroll();
+static bool worldmap_consume_edge_scroll(int targetDx, int targetDy, int* scrollX, int* scrollY);
+static int worldmap_consume_edge_scroll_pixels(double* remainder);
+#endif
 
 // 0x4A9330
 static const unsigned char mouse_table1[3][3][2] = {
@@ -965,6 +979,8 @@ int world_map(WorldMapContext ctx)
     int map_index;
     int scroll_dx;
     int scroll_dy;
+    int edge_scroll_dx;
+    int edge_scroll_dy;
     int scroll_invalid;
     int scroll_invalid_x;
     int scroll_invalid_y;
@@ -1030,6 +1046,10 @@ int world_map(WorldMapContext ctx)
     is_moving_to_town = 0;
     move_counter = 0;
     travel_line_cycle = 0;
+
+#ifdef __SWITCH__
+    worldmap_reset_edge_scroll();
+#endif
 
     if (game_user_wants_to_quit != 0) {
         ctx.state = 1;
@@ -1292,19 +1312,21 @@ int world_map(WorldMapContext ctx)
 
             scroll_dx = 0;
             scroll_dy = 0;
+            edge_scroll_dx = 0;
+            edge_scroll_dy = 0;
             if (abs_mouse_x == 0) {
-                scroll_dx = -1;
+                edge_scroll_dx = -1;
                 autofollow = 0;
             } else if (abs_mouse_x == screenGetWidth() - 1) {
-                scroll_dx = 1;
+                edge_scroll_dx = 1;
                 autofollow = 0;
             }
 
             if (abs_mouse_y == 0) {
-                scroll_dy = -1;
+                edge_scroll_dy = -1;
                 autofollow = 0;
             } else if (abs_mouse_y == screenGetHeight() - 1) {
-                scroll_dy = 1;
+                edge_scroll_dy = 1;
                 autofollow = 0;
             }
 
@@ -1312,32 +1334,37 @@ int world_map(WorldMapContext ctx)
             scroll_invalid_x = 0;
             scroll_invalid_y = 0;
 
-            candidate_viewport_x = viewport_x + 16 * scroll_dx;
+            candidate_viewport_x = viewport_x + 16 * edge_scroll_dx;
             if (candidate_viewport_x < 0 || candidate_viewport_x > VIEWPORT_MAX_X) {
                 scroll_invalid_x = 1;
             }
 
-            candidate_viewport_y = viewport_y + 16 * scroll_dy;
+            candidate_viewport_y = viewport_y + 16 * edge_scroll_dy;
             if (candidate_viewport_y < 0 || candidate_viewport_y > VIEWPORT_MAX_Y) {
                 scroll_invalid_y = 1;
             }
 
-            if (mouse_table1[scroll_dy + 1][scroll_dx + 1][0] == scroll_invalid_x) {
+            if (mouse_table1[edge_scroll_dy + 1][edge_scroll_dx + 1][0] == scroll_invalid_x) {
                 scroll_invalid++;
             }
 
-            if (mouse_table1[scroll_dy + 1][scroll_dx + 1][1] == scroll_invalid_y) {
+            if (mouse_table1[edge_scroll_dy + 1][edge_scroll_dx + 1][1] == scroll_invalid_y) {
                 scroll_invalid++;
             }
 
             switch (scroll_invalid) {
             case 2:
-                gmouse_set_cursor(mouse_table3[scroll_dy + 1][scroll_dx + 1][0]);
+                gmouse_set_cursor(mouse_table3[edge_scroll_dy + 1][edge_scroll_dx + 1][0]);
                 break;
             default:
-                gmouse_set_cursor(mouse_table2[scroll_dy + 1][scroll_dx + 1][0]);
+                gmouse_set_cursor(mouse_table2[edge_scroll_dy + 1][edge_scroll_dx + 1][0]);
                 break;
             }
+
+#ifndef __SWITCH__
+            scroll_dx = edge_scroll_dx;
+            scroll_dy = edge_scroll_dy;
+#endif
 
             switch (input) {
             case KEY_ARROW_LEFT:
@@ -1421,6 +1448,37 @@ int world_map(WorldMapContext ctx)
             }
 
 #ifdef __SWITCH__
+            if (edge_scroll_dx != 0 || edge_scroll_dy != 0) {
+                int edgeScrollX;
+                int edgeScrollY;
+                if (worldmap_consume_edge_scroll(edge_scroll_dx, edge_scroll_dy, &edgeScrollX, &edgeScrollY)) {
+                    candidate_viewport_x = viewport_x + edgeScrollX;
+                    candidate_viewport_y = viewport_y + edgeScrollY;
+
+                    if (candidate_viewport_x < 0) {
+                        candidate_viewport_x = 0;
+                    } else if (candidate_viewport_x > VIEWPORT_MAX_X) {
+                        candidate_viewport_x = VIEWPORT_MAX_X;
+                    }
+
+                    if (candidate_viewport_y < 0) {
+                        candidate_viewport_y = 0;
+                    } else if (candidate_viewport_y > VIEWPORT_MAX_Y) {
+                        candidate_viewport_y = VIEWPORT_MAX_Y;
+                    }
+
+                    if (candidate_viewport_x != viewport_x || candidate_viewport_y != viewport_y) {
+                        viewport_x = candidate_viewport_x;
+                        viewport_y = candidate_viewport_y;
+                        should_redraw = 1;
+                    } else {
+                        worldmap_reset_edge_scroll();
+                    }
+                }
+            } else {
+                worldmap_reset_edge_scroll();
+            }
+
             int stickScrollX;
             int stickScrollY;
             if (switchRightStickCameraConsumeWorldMapScroll(&stickScrollX, &stickScrollY)) {
@@ -3782,6 +3840,62 @@ int PlayCityMapMusic()
 
     return -1;
 }
+
+#ifdef __SWITCH__
+static void worldmap_reset_edge_scroll()
+{
+    worldmap_edge_scroll_last_time = 0;
+    worldmap_edge_scroll_remainder_x = 0.0;
+    worldmap_edge_scroll_remainder_y = 0.0;
+}
+
+static bool worldmap_consume_edge_scroll(int targetDx, int targetDy, int* scrollX, int* scrollY)
+{
+    *scrollX = 0;
+    *scrollY = 0;
+
+    if (targetDx == 0 && targetDy == 0) {
+        worldmap_reset_edge_scroll();
+        return false;
+    }
+
+    unsigned int now = get_time();
+    if (worldmap_edge_scroll_last_time == 0) {
+        worldmap_edge_scroll_last_time = now;
+        return false;
+    }
+
+    unsigned int elapsed = elapsed_time(worldmap_edge_scroll_last_time);
+    worldmap_edge_scroll_last_time = now;
+
+    if (elapsed > WORLDMAP_EDGE_SCROLL_MAX_ELAPSED_MS) {
+        elapsed = WORLDMAP_EDGE_SCROLL_MAX_ELAPSED_MS;
+    }
+
+    double targetX = static_cast<double>(targetDx);
+    double targetY = static_cast<double>(targetDy);
+    if (targetDx != 0 && targetDy != 0) {
+        targetX *= WORLDMAP_EDGE_SCROLL_DIAGONAL_SCALE;
+        targetY *= WORLDMAP_EDGE_SCROLL_DIAGONAL_SCALE;
+    }
+
+    double seconds = static_cast<double>(elapsed) / 1000.0;
+    worldmap_edge_scroll_remainder_x += targetX * WORLDMAP_EDGE_SCROLL_PIXELS_PER_SECOND * seconds;
+    worldmap_edge_scroll_remainder_y += targetY * WORLDMAP_EDGE_SCROLL_PIXELS_PER_SECOND * seconds;
+
+    *scrollX = worldmap_consume_edge_scroll_pixels(&worldmap_edge_scroll_remainder_x);
+    *scrollY = worldmap_consume_edge_scroll_pixels(&worldmap_edge_scroll_remainder_y);
+
+    return *scrollX != 0 || *scrollY != 0;
+}
+
+static int worldmap_consume_edge_scroll_pixels(double* remainder)
+{
+    int scroll = static_cast<int>(*remainder);
+    *remainder -= scroll;
+    return scroll;
+}
+#endif
 
 // 0x4AEBA0
 static void BlackOut()

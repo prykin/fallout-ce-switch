@@ -39,6 +39,18 @@ typedef struct STRUCT_51DA6C {
     int intensity;
 } STRUCT_51DA6C;
 
+typedef struct TileViewState {
+    int tileX;
+    int tileY;
+    int tileOffsetX;
+    int tileOffsetY;
+    int squareX;
+    int squareY;
+    int squareOffsetX;
+    int squareOffsetY;
+    int centerTile;
+} TileViewState;
+
 typedef struct RightsideUpTriangle {
     int field_0;
     int field_4;
@@ -54,6 +66,9 @@ typedef struct UpsideDownTriangle {
 static void refresh_mapper(Rect* rect, int elevation);
 static void refresh_game(Rect* rect, int elevation);
 static bool tile_on_edge(int tile);
+static void tile_update_square_origin();
+static void tile_save_view_state(TileViewState* state);
+static void tile_restore_view_state(const TileViewState* state);
 static void roof_fill_on(int x, int y, int elevation);
 static void roof_fill_off(int x, int y, int elevation);
 static void roof_draw(int fid, int x, int y, Rect* rect, int light);
@@ -546,15 +561,7 @@ int tile_set_center(int tile, int flags)
         tile_offx -= 32;
     }
 
-    square_x = tile_x / 2;
-    square_y = tile_y / 2;
-    square_offx = tile_offx - 16;
-    square_offy = tile_offy - 2;
-
-    if (tile_y & 1) {
-        square_offy -= 12;
-        square_offx -= 16;
-    }
+    tile_update_square_origin();
 
     tile_center_tile = tile;
 
@@ -567,6 +574,106 @@ int tile_set_center(int tile, int flags)
     }
 
     return 0;
+}
+
+int tile_scroll_by_pixels(int dx, int dy)
+{
+    if (dx == 0 && dy == 0) {
+        return -1;
+    }
+
+    TileViewState previousState;
+    tile_save_view_state(&previousState);
+
+    tile_offx -= dx;
+    tile_offy -= dy;
+    tile_update_square_origin();
+    tile_update_bounds_rect();
+
+    int screenCenterX = buf_width / 2;
+    int screenCenterY = buf_length / 2;
+    if (!tile_point_inside_bound(screenCenterX, screenCenterY)) {
+        tile_restore_view_state(&previousState);
+        tile_update_bounds_rect();
+        return -1;
+    }
+
+    int newCenterTile = tile_num(screenCenterX, screenCenterY, map_elevation);
+    if (newCenterTile == -1) {
+        tile_restore_view_state(&previousState);
+        tile_update_bounds_rect();
+        return -1;
+    }
+
+    if (newCenterTile != tile_center_tile) {
+        int oldScreenX;
+        int oldScreenY;
+        if (tile_coord(newCenterTile, &oldScreenX, &oldScreenY, map_elevation) == -1) {
+            tile_restore_view_state(&previousState);
+            tile_update_bounds_rect();
+            return -1;
+        }
+
+        if (tile_set_center(newCenterTile, 0) == -1) {
+            tile_restore_view_state(&previousState);
+            tile_update_bounds_rect();
+            return -1;
+        }
+
+        int newScreenX;
+        int newScreenY;
+        if (tile_coord(newCenterTile, &newScreenX, &newScreenY, map_elevation) == -1) {
+            tile_restore_view_state(&previousState);
+            tile_update_bounds_rect();
+            return -1;
+        }
+
+        tile_offx += oldScreenX - newScreenX;
+        tile_offy += oldScreenY - newScreenY;
+        tile_update_square_origin();
+        tile_update_bounds_rect();
+    }
+
+    return 0;
+}
+
+static void tile_update_square_origin()
+{
+    square_x = tile_x / 2;
+    square_y = tile_y / 2;
+    square_offx = tile_offx - 16;
+    square_offy = tile_offy - 2;
+
+    if (tile_y & 1) {
+        square_offy -= 12;
+        square_offx -= 16;
+    }
+}
+
+static void tile_save_view_state(TileViewState* state)
+{
+    state->tileX = tile_x;
+    state->tileY = tile_y;
+    state->tileOffsetX = tile_offx;
+    state->tileOffsetY = tile_offy;
+    state->squareX = square_x;
+    state->squareY = square_y;
+    state->squareOffsetX = square_offx;
+    state->squareOffsetY = square_offy;
+    state->centerTile = tile_center_tile;
+}
+
+static void tile_restore_view_state(const TileViewState* state)
+{
+    tile_x = state->tileX;
+    tile_y = state->tileY;
+    tile_offx = state->tileOffsetX;
+    tile_offy = state->tileOffsetY;
+    square_x = state->squareX;
+    square_y = state->squareY;
+    square_offx = state->squareOffsetX;
+    square_offy = state->squareOffsetY;
+    tile_center_tile = state->centerTile;
 }
 
 // 0x49E138

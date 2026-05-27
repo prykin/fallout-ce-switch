@@ -811,6 +811,24 @@ int map_scroll(int dx, int dy)
     return 0;
 }
 
+int map_scroll_by_pixels(int dx, int dy)
+{
+    if (dx == 0 && dy == 0) {
+        return -1;
+    }
+
+    gmouse_3d_off();
+
+    if (tile_scroll_by_pixels(dx, dy) == -1) {
+        return -1;
+    }
+
+    tile_refresh_display();
+    win_draw(display_win);
+
+    return 0;
+}
+
 // 0x4744C0
 char* map_file_path(char* name)
 {
