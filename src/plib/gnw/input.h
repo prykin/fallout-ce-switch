@@ -46,7 +46,7 @@ enum class SwitchControlActionType {
     KEY,
     MOUSE_LEFT,
     MOUSE_RIGHT,
-    CURSOR_SPEEDUP
+    HIGHLIGHT
 };
 
 typedef struct SwitchControlAction {

@@ -173,8 +173,10 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "; Change resolution and determine scaling. SCALE_2X=1 will turn 2x scaling on. SCALE_2X=0 will turn it off.\n");
             fprintf(iniFile, "; SCALE_QUALITY can be nearest, linear, or bilinear. bilinear uses the custom scaler.\n");
             fprintf(iniFile, "\n[CONTROLS]\n");
-            fprintf(iniFile, "; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, CURSOR_SPEEDUP, or SDL-style key names.\n");
+            fprintf(iniFile, "; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, HIGHLIGHT, or SDL-style key names.\n");
             fprintf(iniFile, "; Prefix key names with HOLD: when the key should remain down while the controller input is held.\n");
+            fprintf(iniFile, "; HIGHLIGHT controls what the HIGHLIGHT action outlines: all, items, or enemies.\n");
+            fprintf(iniFile, "HIGHLIGHT=all\n");
             fprintf(iniFile, "A=HOLD:SPACE\n");
             fprintf(iniFile, "B=ESCAPE\n");
             fprintf(iniFile, "X=I\n");
@@ -188,7 +190,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "DPAD_LEFT=F6\n");
             fprintf(iniFile, "DPAD_RIGHT=F7\n");
             fprintf(iniFile, "L=B\n");
-            fprintf(iniFile, "R=CURSOR_SPEEDUP\n");
+            fprintf(iniFile, "R=HIGHLIGHT\n");
             fprintf(iniFile, "ZL=S\n");
             fprintf(iniFile, "ZR=MOUSE_RIGHT\n");
             fprintf(iniFile, "RIGHT_STICK_UP=HOLD:UP\n");

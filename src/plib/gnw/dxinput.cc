@@ -24,7 +24,6 @@ static const int JOYSTICK_MAX_VALUE = 32767;
 static const int LEFT_STICK_CURSOR_SPEED = 420;
 static const Uint32 LEFT_STICK_MAX_ELAPSED_MS = 100;
 static PadState pad;
-double cursorSpeedup = 1.0;
 static Uint32 gLastLeftStickTime = 0;
 static double gLeftStickRemainderX = 0.0;
 static double gLeftStickRemainderY = 0.0;
@@ -199,7 +198,7 @@ void handleLeftStickMovement(MouseData* mouseState)
     }
 
     double seconds = static_cast<double>(elapsed) / 1000.0;
-    double speed = static_cast<double>(LEFT_STICK_CURSOR_SPEED) * cursorSpeedup;
+    double speed = static_cast<double>(LEFT_STICK_CURSOR_SPEED);
 
     mouseState->x += consumeCursorDelta(&gLeftStickRemainderX, normalizedX * speed * seconds);
     mouseState->y -= consumeCursorDelta(&gLeftStickRemainderY, normalizedY * speed * seconds);

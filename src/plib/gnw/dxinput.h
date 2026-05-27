@@ -7,7 +7,6 @@ namespace fallout {
 
 #ifdef __SWITCH__
 #include <switch.h>
-extern double cursorSpeedup;
 #endif
 
 typedef struct MouseData {

@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <vector>
+
 #include "game/actions.h"
 #include "game/art.h"
 #include "game/combat.h"
@@ -15,6 +17,7 @@
 #include "game/item.h"
 #include "game/map.h"
 #include "game/object.h"
+#include "game/perk.h"
 #include "game/protinst.h"
 #include "game/proto.h"
 #include "game/skilldex.h"
@@ -46,6 +49,20 @@ static int gmouse_3d_set_flat_fid(int fid, Rect* rect);
 static int gmouse_3d_reset_flat_fid(Rect* rect);
 static int gmouse_3d_move_to(int x, int y, int elevation, Rect* a4);
 static int gmouse_check_scrolling(int x, int y, int cursor);
+static bool gmouse_hold_highlight_includes_items();
+static bool gmouse_hold_highlight_includes_enemies();
+static void gmouse_add_hold_highlight_object(Object* object, int outlineType);
+static void gmouse_add_hold_highlight_objects(int objectType, int outlineType);
+static int gmouse_get_critter_highlight_outline(Object* critter);
+static Object* gmouse_find_object_by_highlight_entry(int objectId, int objectType, int elevation);
+static void gmouse_restore_hold_highlight_objects();
+
+typedef struct HoldHighlightObject {
+    int objectId;
+    int objectType;
+    int elevation;
+    int previousOutline;
+} HoldHighlightObject;
 
 // 0x505258
 static bool gmouse_initialized = false;
@@ -283,6 +300,10 @@ static bool gmouse_3d_item_highlight = true;
 
 // 0x5053F0
 static Object* outlined_object = NULL;
+
+static GameMouseHoldHighlightMode gHoldHighlightMode = GAME_MOUSE_HOLD_HIGHLIGHT_ALL;
+static bool gHoldHighlightActive = false;
+static std::vector<HoldHighlightObject> gHoldHighlightedObjects;
 
 // 0x5053F4
 bool gmouse_clicked_on_edge = false;
@@ -2390,6 +2411,150 @@ void gmouse_remove_item_outline(Object* object)
             tile_refresh_rect(&rect, map_elevation);
         }
         outlined_object = NULL;
+    }
+}
+
+void gmouse_set_hold_highlight_mode(GameMouseHoldHighlightMode mode)
+{
+    bool wasActive = gHoldHighlightActive;
+    if (wasActive) {
+        gmouse_set_hold_highlight_active(false);
+    }
+
+    gHoldHighlightMode = mode;
+
+    if (wasActive) {
+        gmouse_set_hold_highlight_active(true);
+    }
+}
+
+void gmouse_set_hold_highlight_active(bool active)
+{
+    if (gHoldHighlightActive == active) {
+        return;
+    }
+
+    if (!active) {
+        gmouse_restore_hold_highlight_objects();
+        gHoldHighlightedObjects.clear();
+        gHoldHighlightActive = false;
+        tile_refresh_display();
+        return;
+    }
+
+    gHoldHighlightActive = true;
+
+    if (gmouse_hold_highlight_includes_items()) {
+        gmouse_add_hold_highlight_objects(OBJ_TYPE_ITEM, OUTLINE_TYPE_ITEM);
+    }
+
+    if (gmouse_hold_highlight_includes_enemies()) {
+        Object** critters = NULL;
+        int critterCount = obj_create_list(-1, map_elevation, OBJ_TYPE_CRITTER, &critters);
+        for (int index = 0; index < critterCount; index++) {
+            Object* critter = critters[index];
+            if (critter != obj_dude && (critter->data.critter.combat.results & DAM_DEAD) == 0) {
+                gmouse_add_hold_highlight_object(critter, gmouse_get_critter_highlight_outline(critter));
+            }
+        }
+        if (critterCount != 0) {
+            obj_delete_list(critters);
+        }
+    }
+
+    tile_refresh_display();
+}
+
+static bool gmouse_hold_highlight_includes_items()
+{
+    return gHoldHighlightMode == GAME_MOUSE_HOLD_HIGHLIGHT_ALL
+        || gHoldHighlightMode == GAME_MOUSE_HOLD_HIGHLIGHT_ITEMS;
+}
+
+static bool gmouse_hold_highlight_includes_enemies()
+{
+    return gHoldHighlightMode == GAME_MOUSE_HOLD_HIGHLIGHT_ALL
+        || gHoldHighlightMode == GAME_MOUSE_HOLD_HIGHLIGHT_ENEMIES;
+}
+
+static void gmouse_add_hold_highlight_objects(int objectType, int outlineType)
+{
+    Object** objects = NULL;
+    int objectCount = obj_create_list(-1, map_elevation, objectType, &objects);
+    for (int index = 0; index < objectCount; index++) {
+        gmouse_add_hold_highlight_object(objects[index], outlineType);
+    }
+
+    if (objectCount != 0) {
+        obj_delete_list(objects);
+    }
+}
+
+static void gmouse_add_hold_highlight_object(Object* object, int outlineType)
+{
+    if (object == NULL) {
+        return;
+    }
+
+    int previousOutline = object->outline;
+
+    if ((object->outline & OUTLINE_TYPE_MASK) == 0) {
+        if (obj_outline_object(object, outlineType, NULL) != 0) {
+            return;
+        }
+    }
+
+    obj_turn_on_outline(object, NULL);
+
+    if (object->outline == previousOutline) {
+        return;
+    }
+
+    HoldHighlightObject entry;
+    entry.objectId = object->id;
+    entry.objectType = FID_TYPE(object->fid);
+    entry.elevation = object->elevation;
+    entry.previousOutline = previousOutline;
+    gHoldHighlightedObjects.push_back(entry);
+}
+
+static int gmouse_get_critter_highlight_outline(Object* critter)
+{
+    int outlineType = OUTLINE_TYPE_HOSTILE;
+    if (perk_level(PERK_FRIENDLY_FOE)
+        && critter->data.critter.combat.team == obj_dude->data.critter.combat.team) {
+        outlineType = OUTLINE_TYPE_FRIENDLY;
+    }
+
+    return outlineType;
+}
+
+static Object* gmouse_find_object_by_highlight_entry(int objectId, int objectType, int elevation)
+{
+    Object* object = obj_find_first_at(elevation);
+    while (object != NULL) {
+        if (object->id == objectId && FID_TYPE(object->fid) == objectType) {
+            return object;
+        }
+
+        object = obj_find_next_at();
+    }
+
+    return NULL;
+}
+
+static void gmouse_restore_hold_highlight_objects()
+{
+    for (size_t index = 0; index < gHoldHighlightedObjects.size(); index++) {
+        const HoldHighlightObject& entry = gHoldHighlightedObjects[index];
+        Object* object = gmouse_find_object_by_highlight_entry(entry.objectId, entry.objectType, entry.elevation);
+        if (object != NULL) {
+            if (entry.objectType == OBJ_TYPE_CRITTER && combat_is_critter_listed(object)) {
+                continue;
+            }
+
+            object->outline = entry.previousOutline;
+        }
     }
 }
 

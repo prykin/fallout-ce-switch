@@ -27,8 +27,10 @@ SCALE_QUALITY=bilinear
 ; SCALE_QUALITY can be nearest, linear, or bilinear. bilinear uses the custom scaler.
 
 [CONTROLS]
-; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, CURSOR_SPEEDUP, or SDL-style key names.
+; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, HIGHLIGHT, or SDL-style key names.
 ; Prefix key names with HOLD: when the key should remain down while the controller input is held.
+; HIGHLIGHT controls what the HIGHLIGHT action outlines: all, items, or enemies.
+HIGHLIGHT=all
 A=HOLD:SPACE
 B=ESCAPE
 X=I
@@ -42,7 +44,7 @@ DPAD_DOWN=HOME
 DPAD_LEFT=F6
 DPAD_RIGHT=F7
 L=B
-R=CURSOR_SPEEDUP
+R=HIGHLIGHT
 ZL=S
 ZR=MOUSE_RIGHT
 RIGHT_STICK_UP=HOLD:UP
@@ -72,9 +74,9 @@ RIGHT_STICK_RIGHT=HOLD:RIGHT
 
 ## Configuration
 
-- **Cursor Sensitivity**: Adjustable in options via mouse sensitivity. Note this will affect cursor speedup as well.
+- **Cursor Sensitivity**: Adjustable in options via mouse sensitivity.
 - **Resolution**: You can configure resolution and scaling through a config file. Create a file in your `fallout1` folder called `fallout1_nx.ini` - It needs to follow the following structure. `SCALE_QUALITY` can be `nearest`, `linear`, or `bilinear`; `bilinear` uses the custom scaler.
-- **Controls**: You can remap controller buttons in the `[CONTROLS]` section of `fallout1_nx.ini`. Use key names like `A`, `SPACE`, `ESCAPE`, `F6`, `HOME`, `UP`, or actions like `MOUSE_LEFT`, `MOUSE_RIGHT`, `CURSOR_SPEEDUP`, and `NONE`.
+- **Controls**: You can remap controller buttons in the `[CONTROLS]` section of `fallout1_nx.ini`. Use key names like `A`, `SPACE`, `ESCAPE`, `F6`, `HOME`, `UP`, or actions like `MOUSE_LEFT`, `MOUSE_RIGHT`, `HIGHLIGHT`, and `NONE`. `HIGHLIGHT=all|items|enemies` controls which objects are outlined while the highlight action is held.
 
 ## Issues
 

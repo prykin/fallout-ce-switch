@@ -4712,6 +4712,21 @@ int combat_explode_scenery(Object* a1, Object* a2)
     return 0;
 }
 
+bool combat_is_critter_listed(Object* obj)
+{
+    if (!isInCombat() || obj == NULL) {
+        return false;
+    }
+
+    for (int index = 0; index < list_total; index++) {
+        if (combat_list[index] == obj) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // 0x424374
 void combat_delete_critter(Object* obj)
 {

@@ -72,6 +72,12 @@ extern bool gmouse_clicked_on_edge;
 extern Object* obj_mouse;
 extern Object* obj_mouse_flat;
 
+typedef enum GameMouseHoldHighlightMode {
+    GAME_MOUSE_HOLD_HIGHLIGHT_ALL,
+    GAME_MOUSE_HOLD_HIGHLIGHT_ITEMS,
+    GAME_MOUSE_HOLD_HIGHLIGHT_ENEMIES,
+} GameMouseHoldHighlightMode;
+
 int gmouse_init();
 int gmouse_reset();
 void gmouse_exit();
@@ -112,6 +118,8 @@ int gmouse_3d_build_to_hit_frame(const char* string, int color);
 int gmouse_3d_build_hex_frame(const char* string, int color);
 void gmouse_3d_synch_item_highlight();
 void gmouse_remove_item_outline(Object* object);
+void gmouse_set_hold_highlight_mode(GameMouseHoldHighlightMode mode);
+void gmouse_set_hold_highlight_active(bool active);
 
 void gameMouseRefreshImmediately();
 

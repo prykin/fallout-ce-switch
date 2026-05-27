@@ -13,6 +13,7 @@
 
 #include "audio_engine.h"
 #include "game/config.h"
+#include "game/gmouse.h"
 #include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/gnw/button.h"
@@ -163,7 +164,7 @@ static const SwitchControlAction kDefaultButtonActions[SWITCH_BUTTON_COUNT] = {
     { SwitchControlActionType::KEY, SDL_SCANCODE_F6, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_F7, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_B, true },
-    { SwitchControlActionType::CURSOR_SPEEDUP, SDL_SCANCODE_UNKNOWN, false },
+    { SwitchControlActionType::HIGHLIGHT, SDL_SCANCODE_UNKNOWN, false },
     { SwitchControlActionType::KEY, SDL_SCANCODE_S, true },
     { SwitchControlActionType::MOUSE_RIGHT, SDL_SCANCODE_UNKNOWN, false },
 };
@@ -207,6 +208,7 @@ static SwitchStickDirection currentRightStickDirection = SwitchStickDirection::C
 
 static bool parseSwitchControlAction(const char* value, bool defaultTap, SwitchControlAction* action);
 static bool parseSwitchControlScancode(const char* token, SDL_Scancode* scancode);
+static GameMouseHoldHighlightMode parseSwitchHighlightMode(const char* value);
 static void normalizeSwitchControlToken(const char* value, char* token, size_t tokenSize);
 static void applySwitchControlAction(const SwitchControlAction& action, bool pressed);
 static void simulateScancodePress(SDL_Scancode scancode);
@@ -215,6 +217,7 @@ void switchControlsLoad()
 {
     memcpy(switchButtonActions, kDefaultButtonActions, sizeof(switchButtonActions));
     memcpy(switchStickActions, kDefaultStickActions, sizeof(switchStickActions));
+    gmouse_set_hold_highlight_mode(GAME_MOUSE_HOLD_HIGHLIGHT_ALL);
 
     Config config;
     if (!config_init(&config)) {
@@ -222,6 +225,11 @@ void switchControlsLoad()
     }
 
     if (config_load(&config, "fallout1_nx.ini", false)) {
+        char* highlightMode;
+        if (config_get_string(&config, "CONTROLS", "HIGHLIGHT", &highlightMode)) {
+            gmouse_set_hold_highlight_mode(parseSwitchHighlightMode(highlightMode));
+        }
+
         for (int index = 0; index < SWITCH_BUTTON_COUNT; index++) {
             char* value;
             if (config_get_string(&config, "CONTROLS", kButtonConfigKeys[index], &value)) {
@@ -282,6 +290,27 @@ static void normalizeSwitchControlToken(const char* value, char* token, size_t t
     token[length] = '\0';
 }
 
+static GameMouseHoldHighlightMode parseSwitchHighlightMode(const char* value)
+{
+    char token[64];
+    normalizeSwitchControlToken(value, token, sizeof(token));
+
+    if (strcmp(token, "ITEM") == 0 || strcmp(token, "ITEMS") == 0) {
+        return GAME_MOUSE_HOLD_HIGHLIGHT_ITEMS;
+    }
+
+    if (strcmp(token, "ENEMY") == 0
+        || strcmp(token, "ENEMIES") == 0
+        || strcmp(token, "CRITTER") == 0
+        || strcmp(token, "CRITTERS") == 0
+        || strcmp(token, "TARGET") == 0
+        || strcmp(token, "TARGETS") == 0) {
+        return GAME_MOUSE_HOLD_HIGHLIGHT_ENEMIES;
+    }
+
+    return GAME_MOUSE_HOLD_HIGHLIGHT_ALL;
+}
+
 static bool parseSwitchControlAction(const char* value, bool defaultTap, SwitchControlAction* action)
 {
     char token[64];
@@ -317,8 +346,8 @@ static bool parseSwitchControlAction(const char* value, bool defaultTap, SwitchC
         return true;
     }
 
-    if (strcmp(binding, "CURSOR_SPEEDUP") == 0 || strcmp(binding, "CURSOR_SPEED") == 0) {
-        *action = { SwitchControlActionType::CURSOR_SPEEDUP, SDL_SCANCODE_UNKNOWN, false };
+    if (strcmp(binding, "HIGHLIGHT") == 0) {
+        *action = { SwitchControlActionType::HIGHLIGHT, SDL_SCANCODE_UNKNOWN, false };
         return true;
     }
 
@@ -427,8 +456,8 @@ static void applySwitchControlAction(const SwitchControlAction& action, bool pre
             GNW95_process_key(&keyboardData);
         }
         break;
-    case SwitchControlActionType::CURSOR_SPEEDUP:
-        cursorSpeedup = pressed ? 2.0f : 1.0f;
+    case SwitchControlActionType::HIGHLIGHT:
+        gmouse_set_hold_highlight_active(pressed);
         break;
     default:
         break;
@@ -437,10 +466,10 @@ static void applySwitchControlAction(const SwitchControlAction& action, bool pre
 
 static void reinitializeSwitchControllerInput()
 {
+    gmouse_set_hold_highlight_active(false);
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
     dxinput_reinitialize_switch_pad();
-    cursorSpeedup = 1.0;
 }
 #endif
 
@@ -1421,7 +1450,7 @@ static void handleApplicationDeactivated()
 {
     GNW95_isActive = false;
 #ifdef __SWITCH__
-    cursorSpeedup = 1.0;
+    gmouse_set_hold_highlight_active(false);
 #endif
     GNW95_clear_time_stamps();
     audioEnginePause();
@@ -1606,6 +1635,7 @@ static void idleImpl()
 void beginTextInput() {
     textInputActive = true;
 #ifdef __SWITCH__
+    gmouse_set_hold_highlight_active(false);
     while (!textInputQueue.empty()) {
         textInputQueue.pop();
     }
