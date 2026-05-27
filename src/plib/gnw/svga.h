@@ -29,6 +29,7 @@ int screenGetWidth();
 int screenGetHeight();
 void handleWindowSizeChanged();
 void renderPresent();
+void renderMarkDirtyRect(const SDL_Rect* rect);
 
 } // namespace fallout
 

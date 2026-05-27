@@ -453,6 +453,7 @@ namespace {
         }
 
         SDL_BlitSurface(gSdlSurface, &gLastHudRect, gSdlTextureSurface, &gLastHudRect);
+        renderMarkDirtyRect(&gLastHudRect);
         gHudWasDrawn = false;
     }
 
@@ -677,6 +678,7 @@ namespace {
 
         SDL_Rect rect = { kHudX, kHudY, width, height };
         SDL_BlitSurface(gSdlSurface, &rect, gSdlTextureSurface, &rect);
+        renderMarkDirtyRect(&rect);
 
         restoreRectFromBackup(kHudX, kHudY, width, height);
 

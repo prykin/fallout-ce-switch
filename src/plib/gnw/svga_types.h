@@ -14,11 +14,18 @@ typedef int(SetModeFunc)();
 typedef void(ScreenTransBlitFunc)(unsigned char* srcBuf, unsigned int srcW, unsigned int srcH, unsigned int subX, unsigned int subY, unsigned int subW, unsigned int subH, unsigned int dstX, unsigned int dstY, unsigned char trans);
 typedef void(ScreenBlitFunc)(unsigned char* srcBuf, unsigned int srcW, unsigned int srcH, unsigned int subX, unsigned int subY, unsigned int subW, unsigned int subH, unsigned int dstX, unsigned int dstY);
 
+typedef enum RenderScaleQuality {
+    RENDER_SCALE_QUALITY_NEAREST,
+    RENDER_SCALE_QUALITY_LINEAR,
+    RENDER_SCALE_QUALITY_BILINEAR,
+} RenderScaleQuality;
+
 typedef struct VideoOptions {
     int width;
     int height;
     bool fullscreen;
     int scale;
+    RenderScaleQuality scaleQuality;
 } VideoOptions;
 
 } // namespace fallout

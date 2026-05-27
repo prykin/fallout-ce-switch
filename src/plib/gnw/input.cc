@@ -150,11 +150,11 @@ static const SwitchControlAction kNoneAction = {
 };
 
 static const SwitchControlAction kDefaultButtonActions[SWITCH_BUTTON_COUNT] = {
-    { SwitchControlActionType::KEY, SDL_SCANCODE_A, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_SPACE, false },
-    { SwitchControlActionType::KEY, SDL_SCANCODE_S, true },
-    { SwitchControlActionType::KEY, SDL_SCANCODE_I, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_ESCAPE, true },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_I, true },
+    { SwitchControlActionType::MOUSE_LEFT, SDL_SCANCODE_UNKNOWN, false },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_A, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_C, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_1, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_KP_ENTER, true },
@@ -164,7 +164,7 @@ static const SwitchControlAction kDefaultButtonActions[SWITCH_BUTTON_COUNT] = {
     { SwitchControlActionType::KEY, SDL_SCANCODE_F7, true },
     { SwitchControlActionType::KEY, SDL_SCANCODE_B, true },
     { SwitchControlActionType::CURSOR_SPEEDUP, SDL_SCANCODE_UNKNOWN, false },
-    { SwitchControlActionType::MOUSE_LEFT, SDL_SCANCODE_UNKNOWN, false },
+    { SwitchControlActionType::KEY, SDL_SCANCODE_S, true },
     { SwitchControlActionType::MOUSE_RIGHT, SDL_SCANCODE_UNKNOWN, false },
 };
 

@@ -1,6 +1,7 @@
 #include "plib/gnw/dxinput.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 
 #ifdef __SWITCH__
 #include "plib/gnw/input.h"
@@ -19,13 +20,25 @@ static int gMouseWheelDeltaY = 0;
 
 #ifdef __SWITCH__
 static const int JOYSTICK_DEAD_ZONE = 8000;
+static const int JOYSTICK_MAX_VALUE = 32767;
+static const int LEFT_STICK_CURSOR_SPEED = 420;
+static const Uint32 LEFT_STICK_MAX_ELAPSED_MS = 100;
 static PadState pad;
 double cursorSpeedup = 1.0;
+static Uint32 gLastLeftStickTime = 0;
+static double gLeftStickRemainderX = 0.0;
+static double gLeftStickRemainderY = 0.0;
+
+static double normalizeStickAxis(int value);
+static int consumeCursorDelta(double* remainder, double delta);
 
 void dxinput_reinitialize_switch_pad()
 {
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
+    gLastLeftStickTime = 0;
+    gLeftStickRemainderX = 0.0;
+    gLeftStickRemainderY = 0.0;
 }
 #endif
 
@@ -166,14 +179,30 @@ void handleMouseEvent(SDL_Event* event)
 void handleLeftStickMovement(MouseData* mouseState)
 {
     HidAnalogStickState leftStick = padGetStickPos(&pad, 0);
-    if (abs(leftStick.x) > JOYSTICK_DEAD_ZONE || abs(leftStick.y) > JOYSTICK_DEAD_ZONE) {
-        mouseState->x += static_cast<int>((leftStick.x / 10000) * cursorSpeedup * (mouse_sensitivity * 1.5));
-        mouseState->y -= static_cast<int>((leftStick.y / 10000) * cursorSpeedup * (mouse_sensitivity * 1.5));
+    Uint32 now = SDL_GetTicks();
+    if (gLastLeftStickTime == 0) {
+        gLastLeftStickTime = now;
     }
 
-    // Clamp mouse coordinates to screen boundaries
-    if (mouseState->x >= 1708) mouseState->x = 1707;
-    if (mouseState->y >= 960) mouseState->y = 959;
+    Uint32 elapsed = now - gLastLeftStickTime;
+    gLastLeftStickTime = now;
+    if (elapsed > LEFT_STICK_MAX_ELAPSED_MS) {
+        elapsed = LEFT_STICK_MAX_ELAPSED_MS;
+    }
+
+    double normalizedX = normalizeStickAxis(leftStick.x);
+    double normalizedY = normalizeStickAxis(leftStick.y);
+    if (normalizedX == 0.0 && normalizedY == 0.0) {
+        gLeftStickRemainderX = 0.0;
+        gLeftStickRemainderY = 0.0;
+        return;
+    }
+
+    double seconds = static_cast<double>(elapsed) / 1000.0;
+    double speed = static_cast<double>(LEFT_STICK_CURSOR_SPEED) * cursorSpeedup;
+
+    mouseState->x += consumeCursorDelta(&gLeftStickRemainderX, normalizedX * speed * seconds);
+    mouseState->y -= consumeCursorDelta(&gLeftStickRemainderY, normalizedY * speed * seconds);
 }
 
 void handleControllerButtons(MouseData* mouseState)
@@ -216,6 +245,31 @@ void handleControllerButtons(MouseData* mouseState)
             mouseState->buttons[1] = true;
         }
     }
+}
+
+static double normalizeStickAxis(int value)
+{
+    int magnitude = abs(value);
+    if (magnitude <= JOYSTICK_DEAD_ZONE) {
+        return 0.0;
+    }
+
+    double normalized = static_cast<double>(magnitude - JOYSTICK_DEAD_ZONE) / static_cast<double>(JOYSTICK_MAX_VALUE - JOYSTICK_DEAD_ZONE);
+    if (normalized > 1.0) {
+        normalized = 1.0;
+    }
+
+    return value < 0 ? -normalized : normalized;
+}
+
+static int consumeCursorDelta(double* remainder, double delta)
+{
+    *remainder += delta;
+
+    int integerDelta = static_cast<int>(*remainder);
+    *remainder -= integerDelta;
+
+    return integerDelta;
 }
 #endif
 

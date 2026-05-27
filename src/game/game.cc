@@ -73,6 +73,7 @@ static void game_unload_info();
 static void game_help();
 static int game_init_databases();
 static void game_splash_screen();
+static RenderScaleQuality game_parse_scale_quality(const char* value, RenderScaleQuality defaultValue);
 
 // TODO: Remove.
 // 0x4F190C
@@ -156,6 +157,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
     video_options.height = 960;
     video_options.fullscreen = true;
     video_options.scale = 2;
+    video_options.scaleQuality = RENDER_SCALE_QUALITY_BILINEAR;
     video_options.width /= video_options.scale;
     video_options.height /= video_options.scale;
 
@@ -167,15 +169,17 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "SCR_WIDTH=1708\n");
             fprintf(iniFile, "SCR_HEIGHT=960\n");
             fprintf(iniFile, "SCALE_2X=1\n");
+            fprintf(iniFile, "SCALE_QUALITY=bilinear\n");
             fprintf(iniFile, "; Change resolution and determine scaling. SCALE_2X=1 will turn 2x scaling on. SCALE_2X=0 will turn it off.\n");
+            fprintf(iniFile, "; SCALE_QUALITY can be nearest, linear, or bilinear. bilinear uses the custom scaler.\n");
             fprintf(iniFile, "\n[CONTROLS]\n");
             fprintf(iniFile, "; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, CURSOR_SPEEDUP, or SDL-style key names.\n");
             fprintf(iniFile, "; Prefix key names with HOLD: when the key should remain down while the controller input is held.\n");
-            fprintf(iniFile, "A=A\n");
-            fprintf(iniFile, "B=HOLD:SPACE\n");
-            fprintf(iniFile, "X=S\n");
-            fprintf(iniFile, "Y=I\n");
-            fprintf(iniFile, "PLUS=ESCAPE\n");
+            fprintf(iniFile, "A=HOLD:SPACE\n");
+            fprintf(iniFile, "B=ESCAPE\n");
+            fprintf(iniFile, "X=I\n");
+            fprintf(iniFile, "Y=MOUSE_LEFT\n");
+            fprintf(iniFile, "PLUS=A\n");
             fprintf(iniFile, "MINUS=C\n");
             fprintf(iniFile, "LSTICK=1\n");
             fprintf(iniFile, "RSTICK=KP_ENTER\n");
@@ -185,7 +189,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "DPAD_RIGHT=F7\n");
             fprintf(iniFile, "L=B\n");
             fprintf(iniFile, "R=CURSOR_SPEEDUP\n");
-            fprintf(iniFile, "ZL=MOUSE_LEFT\n");
+            fprintf(iniFile, "ZL=S\n");
             fprintf(iniFile, "ZR=MOUSE_RIGHT\n");
             fprintf(iniFile, "RIGHT_STICK_UP=HOLD:UP\n");
             fprintf(iniFile, "RIGHT_STICK_DOWN=HOLD:DOWN\n");
@@ -220,6 +224,11 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
                 video_options.width /= video_options.scale;
                 video_options.height /= video_options.scale;
             }
+
+            char* scaleQuality;
+            if (config_get_string(&resolutionConfig, "MAIN", "SCALE_QUALITY", &scaleQuality)) {
+                video_options.scaleQuality = game_parse_scale_quality(scaleQuality, video_options.scaleQuality);
+            }
         }
         config_exit(&resolutionConfig);
     }
@@ -231,6 +240,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
     video_options.height = 480;
     video_options.fullscreen = false;
     video_options.scale = 1;
+    video_options.scaleQuality = RENDER_SCALE_QUALITY_LINEAR;
 
     Config resolutionConfig;
     if (config_init(&resolutionConfig)) {
@@ -255,6 +265,11 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
                 video_options.scale = scaleValue + 1;
                 video_options.width /= video_options.scale;
                 video_options.height /= video_options.scale;
+            }
+
+            char* scaleQuality;
+            if (config_get_string(&resolutionConfig, "MAIN", "SCALE_QUALITY", &scaleQuality)) {
+                video_options.scaleQuality = game_parse_scale_quality(scaleQuality, video_options.scaleQuality);
             }
         }
         config_exit(&resolutionConfig);
@@ -1391,6 +1406,27 @@ static int game_init_databases()
     db_select(master_db_handle);
 
     return 0;
+}
+
+static RenderScaleQuality game_parse_scale_quality(const char* value, RenderScaleQuality defaultValue)
+{
+    if (value == NULL) {
+        return defaultValue;
+    }
+
+    if (compat_stricmp(value, "nearest") == 0 || strcmp(value, "0") == 0) {
+        return RENDER_SCALE_QUALITY_NEAREST;
+    }
+
+    if (compat_stricmp(value, "linear") == 0 || strcmp(value, "1") == 0) {
+        return RENDER_SCALE_QUALITY_LINEAR;
+    }
+
+    if (compat_stricmp(value, "bilinear") == 0 || strcmp(value, "2") == 0) {
+        return RENDER_SCALE_QUALITY_BILINEAR;
+    }
+
+    return defaultValue;
 }
 
 // 0x43D53C
