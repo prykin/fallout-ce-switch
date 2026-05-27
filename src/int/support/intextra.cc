@@ -124,6 +124,27 @@ char _aCritter[] = "<Critter>";
 // 0x5970D0
 static int dialogue_mood;
 
+#ifdef __SWITCH__
+static constexpr int SCRIPT_PLAYER_AGGRO_MAX_DISTANCE = 12;
+
+static bool script_can_start_player_aggro(Object* attacker, Object* defender)
+{
+    if (attacker == NULL || defender == NULL) {
+        return false;
+    }
+
+    if (defender != obj_dude || isInCombat()) {
+        return true;
+    }
+
+    if (attacker->elevation != defender->elevation) {
+        return false;
+    }
+
+    return obj_dist(attacker, defender) <= SCRIPT_PLAYER_AGGRO_MAX_DISTANCE;
+}
+#endif
+
 // 0x44B5A8
 void dbg_error(Program* program, const char* name, int error)
 {
@@ -1436,7 +1457,11 @@ static void op_obj_can_see_obj(Program* program)
 
             stat_level(object1, STAT_PERCEPTION);
 
-            if (is_within_perception(object1, object2)) {
+            if (is_within_perception(object1, object2)
+#ifdef __SWITCH__
+                && script_can_start_player_aggro(object1, object2)
+#endif
+            ) {
                 Object* a5 = object1;
                 make_straight_path(object1, object1->tile, object2->tile, NULL, &a5, 16);
                 if (a5 == NULL || a5 == object2) {
@@ -1518,6 +1543,13 @@ static void op_attack(Program* program)
             combatData->whoHitMe = target;
         }
     } else {
+#ifdef __SWITCH__
+        if (!script_can_start_player_aggro(self, target)) {
+            program->flags &= ~PROGRAM_FLAG_0x20;
+            return;
+        }
+#endif
+
         STRUCT_664980 attack;
         attack.attacker = self;
         attack.defender = target;
@@ -3730,6 +3762,13 @@ static void op_attack_setup(Program* program)
                 attacker->data.critter.combat.whoHitMe = defender;
             }
         } else {
+#ifdef __SWITCH__
+            if (!script_can_start_player_aggro(attacker, defender)) {
+                program->flags &= ~PROGRAM_FLAG_0x20;
+                return;
+            }
+#endif
+
             STRUCT_664980 attack;
             attack.attacker = attacker;
             attack.defender = defender;

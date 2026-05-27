@@ -2265,7 +2265,7 @@ static int combat_turn(Object* a1, bool a2)
                 game_ui_enable();
                 gmouse_3d_refresh();
 
-                if (gcsd != NULL) {
+                if (gcsd != NULL && gcsd->attacker == obj_dude && gcsd->defender != obj_dude) {
                     combat_attack_this(gcsd->defender);
                 }
 
@@ -2479,6 +2479,10 @@ int combat_attack(Object* attacker, Object* defender, int hitMode, int hitLocati
 {
     bool aiming;
     int actionPoints;
+
+    if (attacker == NULL || defender == NULL || attacker == defender) {
+        return -1;
+    }
 
     if (hitMode == HIT_MODE_PUNCH && roll_random(1, 4) == 1) {
         int fid = art_id(OBJ_TYPE_CRITTER, attacker->fid & 0xFFF, ANIM_KICK_LEG, (attacker->fid & 0xF000) >> 12, (attacker->fid & 0x70000000) >> 28);
@@ -4474,7 +4478,7 @@ bool combat_to_hit(Object* target, int* accuracy)
 // 0x423D98
 void combat_attack_this(Object* a1)
 {
-    if (a1 == NULL) {
+    if (a1 == NULL || a1 == obj_dude) {
         return;
     }
 
