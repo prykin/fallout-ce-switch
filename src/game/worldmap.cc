@@ -1420,6 +1420,35 @@ int world_map(WorldMapContext ctx)
                 should_redraw = 1;
             }
 
+#ifdef __SWITCH__
+            int stickScrollX;
+            int stickScrollY;
+            if (switchRightStickCameraConsumeWorldMapScroll(&stickScrollX, &stickScrollY)) {
+                candidate_viewport_x = viewport_x + stickScrollX;
+                candidate_viewport_y = viewport_y + stickScrollY;
+
+                if (candidate_viewport_x < 0) {
+                    candidate_viewport_x = 0;
+                } else if (candidate_viewport_x > VIEWPORT_MAX_X) {
+                    candidate_viewport_x = VIEWPORT_MAX_X;
+                }
+
+                if (candidate_viewport_y < 0) {
+                    candidate_viewport_y = 0;
+                } else if (candidate_viewport_y > VIEWPORT_MAX_Y) {
+                    candidate_viewport_y = VIEWPORT_MAX_Y;
+                }
+
+                autofollow = 0;
+
+                if (candidate_viewport_x != viewport_x || candidate_viewport_y != viewport_y) {
+                    viewport_x = candidate_viewport_x;
+                    viewport_y = candidate_viewport_y;
+                    should_redraw = 1;
+                }
+            }
+#endif
+
             if (is_moving) {
                 v109 = 0;
                 dropbtn = 0;

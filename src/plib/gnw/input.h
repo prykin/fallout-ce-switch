@@ -33,14 +33,6 @@ enum class HidControllerButtons {
     KEY_COUNT
 };
 
-enum class SwitchStickDirection {
-    RIGHT_UP,
-    RIGHT_DOWN,
-    RIGHT_LEFT,
-    RIGHT_RIGHT,
-    COUNT
-};
-
 enum class SwitchControlActionType {
     NONE,
     KEY,
@@ -57,7 +49,9 @@ typedef struct SwitchControlAction {
 
 void switchControlsLoad();
 const SwitchControlAction& switchControlsGetButtonAction(HidControllerButtons button);
-const SwitchControlAction& switchControlsGetStickAction(SwitchStickDirection direction);
+void switchRightStickCameraReset();
+bool switchRightStickCameraConsumeMapScroll(int* dx, int* dy);
+bool switchRightStickCameraConsumeWorldMapScroll(int* dx, int* dy);
 
 #endif
 

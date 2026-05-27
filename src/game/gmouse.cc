@@ -507,6 +507,18 @@ void gmouse_bk_process()
         return;
     }
 
+#ifdef __SWITCH__
+    if (gmouse_scrolling_is_enabled()) {
+        int stickScrollX;
+        int stickScrollY;
+        if (switchRightStickCameraConsumeMapScroll(&stickScrollX, &stickScrollY)) {
+            if (map_scroll(stickScrollX, stickScrollY) == 0) {
+                return;
+            }
+        }
+    }
+#endif
+
     int mouseX;
     int mouseY;
 

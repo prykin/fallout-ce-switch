@@ -1,6 +1,7 @@
 #include "plib/gnw/input.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,14 +136,20 @@ static unsigned int bk_process_time;
 static bool textInputActive = false;
 
 #ifdef __SWITCH__
-int lastControllerTime = 0;
 const int CONTROLLER_R_DEADZONE = 8000;
+const int CONTROLLER_R_MAX_VALUE = 32767;
+const Uint32 RIGHT_STICK_CAMERA_MAX_ELAPSED_MS = 100;
+const Uint32 RIGHT_STICK_LOCAL_SCROLL_STEP_MS = 33;
+const double RIGHT_STICK_CAMERA_ACCELERATION = 14.0;
+const double RIGHT_STICK_CAMERA_DECELERATION = 8.0;
+const double RIGHT_STICK_LOCAL_SCROLL_STEPS_PER_SECOND = 18.0;
+const double RIGHT_STICK_WORLDMAP_SCROLL_PIXELS_PER_SECOND = 520.0;
+const double RIGHT_STICK_CAMERA_STOP_EPSILON = 0.01;
 static std::queue<SDL_TextInputEvent> textInputQueue;
 bool gInTextInputDialog = false;
 static PadState pad;
 
 static constexpr int SWITCH_BUTTON_COUNT = static_cast<int>(HidControllerButtons::KEY_COUNT);
-static constexpr int SWITCH_STICK_DIRECTION_COUNT = static_cast<int>(SwitchStickDirection::COUNT);
 
 static const SwitchControlAction kNoneAction = {
     SwitchControlActionType::NONE,
@@ -169,13 +176,6 @@ static const SwitchControlAction kDefaultButtonActions[SWITCH_BUTTON_COUNT] = {
     { SwitchControlActionType::MOUSE_RIGHT, SDL_SCANCODE_UNKNOWN, false },
 };
 
-static const SwitchControlAction kDefaultStickActions[SWITCH_STICK_DIRECTION_COUNT] = {
-    { SwitchControlActionType::KEY, SDL_SCANCODE_UP, false },
-    { SwitchControlActionType::KEY, SDL_SCANCODE_DOWN, false },
-    { SwitchControlActionType::KEY, SDL_SCANCODE_LEFT, false },
-    { SwitchControlActionType::KEY, SDL_SCANCODE_RIGHT, false },
-};
-
 static const char* kButtonConfigKeys[SWITCH_BUTTON_COUNT] = {
     "A",
     "B",
@@ -195,16 +195,17 @@ static const char* kButtonConfigKeys[SWITCH_BUTTON_COUNT] = {
     "ZR",
 };
 
-static const char* kStickConfigKeys[SWITCH_STICK_DIRECTION_COUNT] = {
-    "RIGHT_STICK_UP",
-    "RIGHT_STICK_DOWN",
-    "RIGHT_STICK_LEFT",
-    "RIGHT_STICK_RIGHT",
-};
-
 static SwitchControlAction switchButtonActions[SWITCH_BUTTON_COUNT];
-static SwitchControlAction switchStickActions[SWITCH_STICK_DIRECTION_COUNT];
-static SwitchStickDirection currentRightStickDirection = SwitchStickDirection::COUNT;
+static Uint32 gRightStickCameraLastUpdateTime = 0;
+static Uint32 gRightStickCameraLastMapConsumeTime = 0;
+static Uint32 gRightStickCameraLastWorldMapConsumeTime = 0;
+static Uint32 gRightStickCameraLastMapStepTime = 0;
+static double gRightStickCameraX = 0.0;
+static double gRightStickCameraY = 0.0;
+static double gRightStickMapRemainderX = 0.0;
+static double gRightStickMapRemainderY = 0.0;
+static double gRightStickWorldMapRemainderX = 0.0;
+static double gRightStickWorldMapRemainderY = 0.0;
 
 static bool parseSwitchControlAction(const char* value, bool defaultTap, SwitchControlAction* action);
 static bool parseSwitchControlScancode(const char* token, SDL_Scancode* scancode);
@@ -212,11 +213,15 @@ static GameMouseHoldHighlightMode parseSwitchHighlightMode(const char* value);
 static void normalizeSwitchControlToken(const char* value, char* token, size_t tokenSize);
 static void applySwitchControlAction(const SwitchControlAction& action, bool pressed);
 static void simulateScancodePress(SDL_Scancode scancode);
+static double normalizeSwitchRightStickAxis(int value);
+static void updateRightStickCamera(const HidAnalogStickState& rightStick);
+static void addRightStickCameraScroll(double seconds, double scrollPerSecond, double* remainderX, double* remainderY);
+static int consumeRightStickScrollStep(double* remainder);
+static int consumeRightStickScrollPixels(double* remainder);
 
 void switchControlsLoad()
 {
     memcpy(switchButtonActions, kDefaultButtonActions, sizeof(switchButtonActions));
-    memcpy(switchStickActions, kDefaultStickActions, sizeof(switchStickActions));
     gmouse_set_hold_highlight_mode(GAME_MOUSE_HOLD_HIGHLIGHT_ALL);
 
     Config config;
@@ -236,13 +241,6 @@ void switchControlsLoad()
                 parseSwitchControlAction(value, kDefaultButtonActions[index].tap, &(switchButtonActions[index]));
             }
         }
-
-        for (int index = 0; index < SWITCH_STICK_DIRECTION_COUNT; index++) {
-            char* value;
-            if (config_get_string(&config, "CONTROLS", kStickConfigKeys[index], &value)) {
-                parseSwitchControlAction(value, kDefaultStickActions[index].tap, &(switchStickActions[index]));
-            }
-        }
     }
 
     config_exit(&config);
@@ -258,14 +256,175 @@ const SwitchControlAction& switchControlsGetButtonAction(HidControllerButtons bu
     return switchButtonActions[index];
 }
 
-const SwitchControlAction& switchControlsGetStickAction(SwitchStickDirection direction)
+void switchRightStickCameraReset()
 {
-    int index = static_cast<int>(direction);
-    if (index < 0 || index >= SWITCH_STICK_DIRECTION_COUNT) {
-        return kNoneAction;
+    gRightStickCameraLastUpdateTime = 0;
+    gRightStickCameraLastMapConsumeTime = 0;
+    gRightStickCameraLastWorldMapConsumeTime = 0;
+    gRightStickCameraLastMapStepTime = 0;
+    gRightStickCameraX = 0.0;
+    gRightStickCameraY = 0.0;
+    gRightStickMapRemainderX = 0.0;
+    gRightStickMapRemainderY = 0.0;
+    gRightStickWorldMapRemainderX = 0.0;
+    gRightStickWorldMapRemainderY = 0.0;
+}
+
+bool switchRightStickCameraConsumeMapScroll(int* dx, int* dy)
+{
+    *dx = 0;
+    *dy = 0;
+
+    Uint32 now = SDL_GetTicks();
+    if (gRightStickCameraLastMapConsumeTime == 0) {
+        gRightStickCameraLastMapConsumeTime = now;
+        return false;
     }
 
-    return switchStickActions[index];
+    Uint32 elapsed = now - gRightStickCameraLastMapConsumeTime;
+    gRightStickCameraLastMapConsumeTime = now;
+
+    if (elapsed > RIGHT_STICK_CAMERA_MAX_ELAPSED_MS) {
+        elapsed = RIGHT_STICK_CAMERA_MAX_ELAPSED_MS;
+    }
+
+    addRightStickCameraScroll(
+        static_cast<double>(elapsed) / 1000.0,
+        RIGHT_STICK_LOCAL_SCROLL_STEPS_PER_SECOND,
+        &gRightStickMapRemainderX,
+        &gRightStickMapRemainderY);
+
+    if (now - gRightStickCameraLastMapStepTime < RIGHT_STICK_LOCAL_SCROLL_STEP_MS) {
+        return false;
+    }
+
+    int scrollX = consumeRightStickScrollStep(&gRightStickMapRemainderX);
+    int scrollY = consumeRightStickScrollStep(&gRightStickMapRemainderY);
+    if (scrollX == 0 && scrollY == 0) {
+        return false;
+    }
+
+    gRightStickCameraLastMapStepTime = now;
+    *dx = scrollX;
+    *dy = scrollY;
+    return true;
+}
+
+bool switchRightStickCameraConsumeWorldMapScroll(int* dx, int* dy)
+{
+    *dx = 0;
+    *dy = 0;
+
+    Uint32 now = SDL_GetTicks();
+    if (gRightStickCameraLastWorldMapConsumeTime == 0) {
+        gRightStickCameraLastWorldMapConsumeTime = now;
+        return false;
+    }
+
+    Uint32 elapsed = now - gRightStickCameraLastWorldMapConsumeTime;
+    gRightStickCameraLastWorldMapConsumeTime = now;
+
+    if (elapsed > RIGHT_STICK_CAMERA_MAX_ELAPSED_MS) {
+        elapsed = RIGHT_STICK_CAMERA_MAX_ELAPSED_MS;
+    }
+
+    addRightStickCameraScroll(
+        static_cast<double>(elapsed) / 1000.0,
+        RIGHT_STICK_WORLDMAP_SCROLL_PIXELS_PER_SECOND,
+        &gRightStickWorldMapRemainderX,
+        &gRightStickWorldMapRemainderY);
+
+    int scrollX = consumeRightStickScrollPixels(&gRightStickWorldMapRemainderX);
+    int scrollY = consumeRightStickScrollPixels(&gRightStickWorldMapRemainderY);
+    if (scrollX == 0 && scrollY == 0) {
+        return false;
+    }
+
+    *dx = scrollX;
+    *dy = scrollY;
+    return true;
+}
+
+static double normalizeSwitchRightStickAxis(int value)
+{
+    int magnitude = abs(value);
+    if (magnitude <= CONTROLLER_R_DEADZONE) {
+        return 0.0;
+    }
+
+    double normalized = static_cast<double>(magnitude - CONTROLLER_R_DEADZONE)
+        / static_cast<double>(CONTROLLER_R_MAX_VALUE - CONTROLLER_R_DEADZONE);
+    if (normalized > 1.0) {
+        normalized = 1.0;
+    }
+
+    return value < 0 ? -normalized : normalized;
+}
+
+static void updateRightStickCamera(const HidAnalogStickState& rightStick)
+{
+    Uint32 now = SDL_GetTicks();
+    if (gRightStickCameraLastUpdateTime == 0) {
+        gRightStickCameraLastUpdateTime = now;
+        return;
+    }
+
+    Uint32 elapsed = now - gRightStickCameraLastUpdateTime;
+    gRightStickCameraLastUpdateTime = now;
+
+    if (elapsed > RIGHT_STICK_CAMERA_MAX_ELAPSED_MS) {
+        elapsed = RIGHT_STICK_CAMERA_MAX_ELAPSED_MS;
+    }
+
+    double targetX = normalizeSwitchRightStickAxis(rightStick.x);
+    double targetY = -normalizeSwitchRightStickAxis(rightStick.y);
+    bool hasInput = targetX != 0.0 || targetY != 0.0;
+    double response = hasInput ? RIGHT_STICK_CAMERA_ACCELERATION : RIGHT_STICK_CAMERA_DECELERATION;
+    double alpha = response * (static_cast<double>(elapsed) / 1000.0);
+    if (alpha > 1.0) {
+        alpha = 1.0;
+    }
+
+    gRightStickCameraX += (targetX - gRightStickCameraX) * alpha;
+    gRightStickCameraY += (targetY - gRightStickCameraY) * alpha;
+
+    if (!hasInput) {
+        if (fabs(gRightStickCameraX) < RIGHT_STICK_CAMERA_STOP_EPSILON) {
+            gRightStickCameraX = 0.0;
+        }
+
+        if (fabs(gRightStickCameraY) < RIGHT_STICK_CAMERA_STOP_EPSILON) {
+            gRightStickCameraY = 0.0;
+        }
+    }
+}
+
+static void addRightStickCameraScroll(double seconds, double scrollPerSecond, double* remainderX, double* remainderY)
+{
+    *remainderX += gRightStickCameraX * scrollPerSecond * seconds;
+    *remainderY += gRightStickCameraY * scrollPerSecond * seconds;
+}
+
+static int consumeRightStickScrollStep(double* remainder)
+{
+    if (*remainder >= 1.0) {
+        *remainder -= 1.0;
+        return 1;
+    }
+
+    if (*remainder <= -1.0) {
+        *remainder += 1.0;
+        return -1;
+    }
+
+    return 0;
+}
+
+static int consumeRightStickScrollPixels(double* remainder)
+{
+    int scroll = static_cast<int>(*remainder);
+    *remainder -= scroll;
+    return scroll;
 }
 
 static void normalizeSwitchControlToken(const char* value, char* token, size_t tokenSize)
@@ -467,6 +626,7 @@ static void applySwitchControlAction(const SwitchControlAction& action, bool pre
 static void reinitializeSwitchControllerInput()
 {
     gmouse_set_hold_highlight_active(false);
+    switchRightStickCameraReset();
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
     dxinput_reinitialize_switch_pad();
@@ -1451,6 +1611,7 @@ static void handleApplicationDeactivated()
     GNW95_isActive = false;
 #ifdef __SWITCH__
     gmouse_set_hold_highlight_active(false);
+    switchRightStickCameraReset();
 #endif
     GNW95_clear_time_stamps();
     audioEnginePause();
@@ -1636,6 +1797,7 @@ void beginTextInput() {
     textInputActive = true;
 #ifdef __SWITCH__
     gmouse_set_hold_highlight_active(false);
+    switchRightStickCameraReset();
     while (!textInputQueue.empty()) {
         textInputQueue.pop();
     }
@@ -1910,46 +2072,12 @@ void handleControllerButtonEvent(HidControllerButtons button, bool pressed) {
 
 void handleControllerAxisEvent(const HidAnalogStickState& rightStick)
 {
-    SwitchStickDirection direction = SwitchStickDirection::COUNT;
-
     if (textInputActive) {
-        if (currentRightStickDirection != SwitchStickDirection::COUNT) {
-            applySwitchControlAction(switchControlsGetStickAction(currentRightStickDirection), false);
-            currentRightStickDirection = SwitchStickDirection::COUNT;
-        }
+        switchRightStickCameraReset();
         return;
     }
 
-    const uint32_t currentTime = SDL_GetTicks();
-    lastControllerTime = currentTime;
-
-    // Priority: Up > Down > Right > Left
-    if (rightStick.y > CONTROLLER_R_DEADZONE && abs(rightStick.y) > abs(rightStick.x)) {
-        direction = SwitchStickDirection::RIGHT_UP;
-    } 
-    else if (rightStick.y < -CONTROLLER_R_DEADZONE && abs(rightStick.y) > abs(rightStick.x)) {
-        direction = SwitchStickDirection::RIGHT_DOWN;
-    } 
-    else if (rightStick.x > CONTROLLER_R_DEADZONE) {
-        direction = SwitchStickDirection::RIGHT_RIGHT;
-    } 
-    else if (rightStick.x < -CONTROLLER_R_DEADZONE) {
-        direction = SwitchStickDirection::RIGHT_LEFT;
-    }
-
-    if (direction == currentRightStickDirection) {
-        return;
-    }
-
-    if (currentRightStickDirection != SwitchStickDirection::COUNT) {
-        applySwitchControlAction(switchControlsGetStickAction(currentRightStickDirection), false);
-    }
-
-    currentRightStickDirection = direction;
-
-    if (currentRightStickDirection != SwitchStickDirection::COUNT) {
-        applySwitchControlAction(switchControlsGetStickAction(currentRightStickDirection), true);
-    }
+    updateRightStickCamera(rightStick);
 }
 #endif
 

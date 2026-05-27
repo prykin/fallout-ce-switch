@@ -176,6 +176,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "; Use NONE, MOUSE_LEFT, MOUSE_RIGHT, HIGHLIGHT, or SDL-style key names.\n");
             fprintf(iniFile, "; Prefix key names with HOLD: when the key should remain down while the controller input is held.\n");
             fprintf(iniFile, "; HIGHLIGHT controls what the HIGHLIGHT action outlines: all, items, or enemies.\n");
+            fprintf(iniFile, "; Right stick controls map and world map camera scrolling directly.\n");
             fprintf(iniFile, "HIGHLIGHT=all\n");
             fprintf(iniFile, "A=HOLD:SPACE\n");
             fprintf(iniFile, "B=ESCAPE\n");
@@ -193,10 +194,6 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
             fprintf(iniFile, "R=HIGHLIGHT\n");
             fprintf(iniFile, "ZL=S\n");
             fprintf(iniFile, "ZR=MOUSE_RIGHT\n");
-            fprintf(iniFile, "RIGHT_STICK_UP=HOLD:UP\n");
-            fprintf(iniFile, "RIGHT_STICK_DOWN=HOLD:DOWN\n");
-            fprintf(iniFile, "RIGHT_STICK_LEFT=HOLD:LEFT\n");
-            fprintf(iniFile, "RIGHT_STICK_RIGHT=HOLD:RIGHT\n");
             fclose(iniFile);
         }
     } else {
