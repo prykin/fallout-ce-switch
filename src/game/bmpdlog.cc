@@ -1089,7 +1089,10 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
     fileNameCopy[fileNameCopyLength + 1] = '\0';
     fileNameCopy[fileNameCopyLength] = ' ';
 
-    unsigned char* fileNameBufferPtr = windowBuffer + backgroundWidth * 190 + 57;
+    const int fileNameInputX = 57;
+    const int fileNameInputY = 190;
+    const int fileNameInputWidth = FILE_DIALOG_FILE_LIST_WIDTH;
+    unsigned char* fileNameBufferPtr = windowBuffer + backgroundWidth * fileNameInputY + fileNameInputX;
 
     buf_fill(fileNameBufferPtr, text_width(fileNameCopy), cursorHeight, backgroundWidth, 100);
     text_to_buf(fileNameBufferPtr, fileNameCopy, backgroundWidth, backgroundWidth, colorTable[992]);
@@ -1132,8 +1135,6 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
 
         flush_input_buffer();
     };
-
-    promptKeyboardTextInput();
 #endif
 
     int blinkingCounter = 3;
@@ -1155,7 +1156,12 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
         convertMouseWheelToArrowKey(&keyCode);
 
 #ifdef __SWITCH__
-        if (keyCode == KEY_1) {
+        if (keyCode == -2
+            && switchTextInputFieldClicked(win,
+                fileNameInputX,
+                fileNameInputY,
+                fileNameInputX + fileNameInputWidth - 1,
+                fileNameInputY + cursorHeight - 1)) {
             promptKeyboardTextInput();
             continue;
         }

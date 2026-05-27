@@ -183,6 +183,9 @@ static int about_init();
 static void about_exit();
 static void about_loop();
 static int about_process_input(int input);
+#ifdef __SWITCH__
+static void about_prompt_keyboard();
+#endif
 static void about_update_display(unsigned char should_redraw);
 static void about_clear_display(unsigned char should_redraw);
 static void about_reset_string();
@@ -3821,20 +3824,6 @@ static void about_loop()
 #ifdef __SWITCH__
     gInTextInputDialog = true;
     flush_input_buffer();
-
-    char kbdBuffer[128] = {0};
-    if (editTextBufferWithKeyboard(kbdBuffer, sizeof(kbdBuffer), 126)) {
-        int len = strlen(kbdBuffer);
-        for (int i = 0; i < len && i < 126; i++) {
-            about_input_string[i] = kbdBuffer[i];
-        }
-        about_input_index = len;
-        about_input_string[about_input_index] = about_input_cursor;
-        about_input_string[about_input_index + 1] = '\0';
-    }
-    text_font(101);
-    about_update_display(1);
-    flush_input_buffer();
 #endif
 
     while (1) {
@@ -3870,22 +3859,13 @@ static int about_process_input(int input)
     }
 
 #ifdef __SWITCH__
-    if (input == KEY_1) {
-        char kbdBuffer[128] = {0};
-        strncpy(kbdBuffer, about_input_string, about_input_index);
-        kbdBuffer[about_input_index] = '\0';
-
-        if (editTextBufferWithKeyboard(kbdBuffer, sizeof(kbdBuffer), 126)) {
-            int len = strlen(kbdBuffer);
-            for (int i = 0; i < len && i < 126; i++) {
-                about_input_string[i] = kbdBuffer[i];
-            }
-            about_input_index = len;
-            about_input_string[about_input_index] = about_input_cursor;
-            about_input_string[about_input_index + 1] = '\0';
-        }
-        text_font(101);
-        about_update_display(1);
+    if (input == -2
+        && switchTextInputFieldClicked(about_win,
+            about_input_rect.ulx,
+            about_input_rect.uly,
+            about_input_rect.lrx,
+            about_input_rect.lry)) {
+        about_prompt_keyboard();
         return 0;
     }
 #endif
@@ -3940,6 +3920,34 @@ static int about_process_input(int input)
 
     return 0;
 }
+
+#ifdef __SWITCH__
+static void about_prompt_keyboard()
+{
+    char kbdBuffer[128] = {0};
+    strncpy(kbdBuffer, about_input_string, about_input_index);
+    kbdBuffer[about_input_index] = '\0';
+
+    if (editTextBufferWithKeyboard(kbdBuffer, sizeof(kbdBuffer), 126)) {
+        int len = strlen(kbdBuffer);
+        for (int index = 0; index < len && index < 126; index++) {
+            about_input_string[index] = kbdBuffer[index];
+        }
+
+        about_input_index = len;
+        if (about_input_index > 126) {
+            about_input_index = 126;
+        }
+
+        about_input_string[about_input_index] = about_input_cursor;
+        about_input_string[about_input_index + 1] = '\0';
+    }
+
+    text_font(101);
+    about_update_display(1);
+    flush_input_buffer();
+}
+#endif
 
 // 0x442800
 static void about_update_display(unsigned char should_redraw)

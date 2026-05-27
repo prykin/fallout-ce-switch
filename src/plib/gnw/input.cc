@@ -1856,6 +1856,12 @@ bool editTextBufferWithKeyboard(char* textBuffer, int textBufferSize, int maxLen
     textBuffer[textBufferSize - 1] = '\0';
     return showTextKeyboard(textBuffer[0] != '\0' ? textBuffer : NULL, textBuffer, textBufferSize, maxLen);
 }
+
+bool switchTextInputFieldClicked(int win, int left, int top, int right, int bottom)
+{
+    return (mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_UP) != 0
+        && mouseHitTestInWindow(win, left, top, right, bottom);
+}
 #endif
 
 void endTextInput() {
@@ -1946,18 +1952,6 @@ static void simulateScancodePress(SDL_Scancode scancode)
     GNW95_process_key(&keyboardData);
 }
 
-static void injectTextAsKeyEvents(const char* text)
-{
-    for (const char* ch = text; *ch != '\0'; ++ch) {
-        SDL_Scancode scancode = mapCharToScancode(*ch);
-        if (scancode == SDL_SCANCODE_UNKNOWN) {
-            continue;
-        }
-
-        simulateKeyEvent(scancode, *ch);
-    }
-}
-
 void handleSwitchControllerEvents(uint64_t kDown, uint64_t kUp, uint64_t kHeld) {
     bool diagnosticsHudComboPressed = false;
 
@@ -2026,21 +2020,7 @@ void handleSwitchControllerEvents(uint64_t kDown, uint64_t kUp, uint64_t kHeld) 
 
 void handleControllerButtonEvent(HidControllerButtons button, bool pressed) {
     if (textInputActive) {
-        if (button != HidControllerButtons::KEY_LSTICK) {
-            return;
-        }
-
-        if (!pressed) {
-            return;
-        }
-
-        if (!gInTextInputDialog) {
-            char keyboardBuffer[256] = {0};
-            if (editTextBufferWithKeyboard(keyboardBuffer, sizeof(keyboardBuffer), 254)) {
-                injectTextAsKeyEvents(keyboardBuffer);
-            }
-            return;
-        }
+        return;
     }
 
     applySwitchControlAction(switchControlsGetButtonAction(button), pressed);

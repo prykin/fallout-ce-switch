@@ -108,6 +108,7 @@ void simulateKeyEvent(SDL_Scancode scancode, char ch);
 int showNumericKeyboard(int currentValue, int maxValue);
 bool showTextKeyboard(const char* initialText, char* outBuffer, int outBufferSize, int maxLen);
 bool editTextBufferWithKeyboard(char* textBuffer, int textBufferSize, int maxLen);
+bool switchTextInputFieldClicked(int win, int left, int top, int right, int bottom);
 
 extern bool gInTextInputDialog;
 

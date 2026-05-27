@@ -2360,6 +2360,12 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
 #ifdef __SWITCH__
     gInTextInputDialog = true;
 
+    int keyboardFieldRight = x + maxLength * text_char_width('W') + cursorWidth;
+    if (keyboardFieldRight >= windowWidth) {
+        keyboardFieldRight = windowWidth - 1;
+    }
+    int keyboardFieldBottom = y + lineHeight - 1;
+
     auto promptKeyboardTextInput = [&]() {
         char keyboardBuffer[256];
         memcpy(keyboardBuffer, text, textLength);
@@ -2411,7 +2417,7 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
         }
 
 #ifdef __SWITCH__
-        if (keyCode == KEY_1) {
+        if (keyCode == -2 && switchTextInputFieldClicked(win, x, y, keyboardFieldRight, keyboardFieldBottom)) {
             promptKeyboardTextInput();
             continue;
         }
